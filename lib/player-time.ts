@@ -13,18 +13,28 @@
 export const DEFAULT_DVR_SECONDS = 4 * 60 * 60;
 
 /**
- * How long YouTube keeps its own chrome on screen after a state change *while
- * it goes on playing*.
+ * How long YouTube's own chrome takes to put itself away after a state change.
  *
- * Measured, not guessed: a resume or an API seek raises the title bar, the
- * centred state disc, "More videos" and the logo, and they are still up at 3s
- * and gone by 4s. Nothing outside the iframe can dismiss them early, so the
- * mask that hides them has to outlast them.
+ * Measured against a real `controls=0` embed, with our mask switched off so
+ * there was something to actually look at: a resume or an API seek raises the
+ * title bar, the avatar, a centred state glyph, the share button and the logo —
+ * and then **fades all of it out by itself**. Up at 1s, visibly dissolving at
+ * 2.5s, gone by 4s.
  *
- * Note what this window does *not* cover: while the player sits in PAUSED the
- * chrome does not time out at all — it stays until playback resumes. That is
- * why `pictureCover` masks a paused picture on the phase rather than on a
- * timer.
+ * Two things that measurement corrected, both of which this file previously
+ * asserted as fact:
+ *
+ * 1. A **pause raises nothing at all**. Not the title bar, not a play button.
+ *    The claim that pause chrome "stays until playback resumes" is false for
+ *    this embed configuration — a paused picture is clean at 1.5s and still
+ *    clean at 8s.
+ * 2. Because the rest fades on its own, and gracefully, there is nothing here
+ *    worth covering. Anything laid over the picture to hide it is more
+ *    intrusive than the thing it hides, and lasts longer.
+ *
+ * So nothing masks the picture any more, and this constant survives for the one
+ * job left to it: the wall's tiles are raw iframes with no JS API, so they have
+ * no PLAYING event and hold their own poster for this long while warming up.
  */
 export const YT_CHROME_MS = 4000;
 
@@ -50,18 +60,21 @@ export type Phase = "cold" | "cued" | "buffering" | "playing" | "paused" | "ende
  * What, if anything, goes over the picture.
  *
  * - `poster`  — the video's own frame, before there is any decoded picture.
- * - `mask`    — the two rectangles YouTube paints in, and nothing else.
  * - `none`    — the picture, uncovered.
  * - `slate`   — a full cover. Only where there is no footage left to protect.
+ *
+ * There used to be a fourth: `mask`, a set of scrims and a disc laid over the
+ * places YouTube paints its own chrome. It is gone. See `YT_CHROME_MS` for the
+ * measurement that removed it — the short version is that a pause raises no
+ * chrome at all and everything else fades itself out within three seconds, so
+ * the cover was more intrusive, and longer-lived, than what it covered.
  */
-export type Cover = "poster" | "mask" | "none" | "slate";
+export type Cover = "poster" | "none" | "slate";
 
 export interface CoverInput {
   phase: Phase;
   /** Set once the player has reported PLAYING at least once. */
   hasPlayed: boolean;
-  /** True inside the `YT_CHROME_MS` window after something we asked for. */
-  settling: boolean;
   /** A refusal from YouTube — an embed ban, or a video that won't play. */
   failure?: boolean;
 }
@@ -69,12 +82,11 @@ export interface CoverInput {
 /**
  * The whole picture-cover decision, in one total function.
  *
- * The rule the ticket bought: the footage is never hidden as a whole. A frame
- * that exists is shown — masked over the two places YouTube paints, never
- * blacked out. A frame that does not exist yet is stood in for by the poster,
- * and a frame that is gone for good gets a slate.
+ * The rule: a frame that exists is shown, and nothing is laid over it. A frame
+ * that does not exist yet is stood in for by the poster, and a frame that is
+ * gone for good gets a slate.
  */
-export function pictureCover({ phase, hasPlayed, settling, failure }: CoverInput): Cover {
+export function pictureCover({ phase, hasPlayed, failure }: CoverInput): Cover {
   // Nothing to protect: YouTube paints an error card or an end-screen grid of
   // suggestions over the whole frame, and there is no footage under either.
   if (failure) return "slate";
@@ -85,32 +97,8 @@ export function pictureCover({ phase, hasPlayed, settling, failure }: CoverInput
   // cover art over live footage, which is what `hasPlayed` separates.
   if (!hasPlayed && phase !== "playing") return "poster";
 
-  // Stopped: the disc, the title bar and the avatar are up and will stay up.
-  if (phase === "paused" || phase === "cued" || phase === "cold") return "mask";
-
-  // Playing, but a resume or a seek just raised the chrome for a few seconds.
-  return settling ? "mask" : "none";
-}
-
-/**
- * Which glyph the mask's centre disc carries.
- *
- * YouTube paints a control right there — a big standing button while the
- * picture is stopped, a ripple as it acknowledges a resume or a seek — so the
- * disc has to be opaque over all of it either way. What it must not be is
- * *blank*: an unmarked dark circle in the middle of the frame reads as a smudge
- * over a hole, and a half-transparent one lets YouTube's own glyph show
- * straight through, which is the conflict this whole ticket is about. So the
- * disc always covers, and it always says something.
- *
- * Paused is the only state that says "pause". Everything else the mask covers —
- * a resume, a seek, a cued or cold picture — is a picture that is about to be,
- * or already is, running.
- */
-export type MaskGlyph = "play" | "pause";
-
-export function maskGlyph(phase: Phase): MaskGlyph {
-  return phase === "paused" ? "pause" : "play";
+  // Paused, seeking, resuming, running — all of it is a picture, shown as one.
+  return "none";
 }
 
 /** The words that go with a cover. Short enough to sit in a corner badge. */

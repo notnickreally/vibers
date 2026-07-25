@@ -23,13 +23,11 @@ import {
   fractionOf,
   isFiniteNumber,
   liveOffsetLabel,
-  maskGlyph,
   narrowDvr,
   type Phase,
   pictureCover,
   positionAt,
   seekWindow,
-  YT_CHROME_MS,
 } from "@/lib/player-time";
 import { posterFallbackUrl, posterUrl } from "@/lib/youtube";
 
@@ -52,19 +50,24 @@ import { posterFallbackUrl, posterUrl } from "@/lib/youtube";
  * none** — and it is also the cheapest fix, because a click that never reaches
  * the iframe is chrome that is never summoned in the first place.
  *
- * What the shield cannot reach is the chrome a *state change* raises: a resume
- * or a seek puts it up for about four seconds, and a pause puts it up until
- * playback resumes.
+ * What the shield cannot reach is the chrome a *state change* raises. Nothing
+ * is laid over the picture to hide that, and the history of this file is two
+ * rounds of learning why not: first the whole frame was blacked out, then only
+ * the places YouTube paints were covered with scrims and a disc. Both were
+ * built on an assumption nobody had checked.
  *
- * This used to be answered by blacking the whole frame out, which meant a
- * paused stream was a black rectangle and a loading one was four seconds of
- * nothing. It is now answered by covering only where YouTube actually paints —
- * a title-bar gradient across the top and a disc over the centre carrying our
- * own state glyph — so a paused picture stays a picture. Before there is any
- * decoded frame at all, the video's poster stands in. A full slate survives in
- * exactly two places, where there is no footage left to protect: a refusal,
- * and the end-screen grid. `pictureCover` in `lib/player-time` is that whole
- * decision, and it is where to change it.
+ * Checking it — screenshotting a real embed with the cover switched off —
+ * showed that **a pause raises no YouTube chrome at all**, and that what a
+ * resume or a seek does raise fades itself out gracefully inside three
+ * seconds. The cover was heavier than the thing it covered and stayed up
+ * longer. So it is gone: the picture is the picture, and YouTube's own chrome
+ * is left to come and go on its own, which it does faster than any furniture
+ * of ours could. `YT_CHROME_MS` in `lib/player-time` carries the measurement.
+ *
+ * What remains over the picture is only what stands in for a frame that isn't
+ * there: the video's poster before anything has decoded, and a slate in the
+ * two places with no footage to protect — a refusal, and the end-screen grid.
+ * `pictureCover` is that whole decision, and it is where to change it.
  *
  * Note what this costs. Hiding the embed's branding is against YouTube's embed
  * terms, and the attribution it carries is part of what makes carrying someone
@@ -225,18 +228,6 @@ export function CleanPlayer({
   // cursor before you commit to it. Null on touch, which has no hover.
   const [hover, setHover] = useState<number | null>(null);
 
-  // The settling window. A resume or a seek raises YouTube's chrome for about
-  // four seconds and it cannot be dismissed from out here, so the mask is held
-  // over that window even while the picture is running. Calling `coverChrome`
-  // again restarts it.
-  const [settling, setSettling] = useState(false);
-  const [settleUntil, setSettleUntil] = useState(0);
-  const coverChrome = useCallback(() => {
-    setSettling(true);
-    // Event handler, not render — the no-clock-during-render rule holds.
-    setSettleUntil(Date.now() + YT_CHROME_MS);
-  }, []);
-
   const [fullscreen, setFullscreen] = useState(false);
   const [fsSupported, setFsSupported] = useState(false);
 
@@ -366,19 +357,6 @@ export function CleanPlayer({
     return () => clearInterval(id);
   }, [ready, live]);
 
-  // Close the settling window when it actually elapses.
-  //
-  // The old shape of this was `Math.max(0, coverUntil - Date.now()) ||
-  // YT_CHROME_MS`, which on a cold start (`coverUntil === 0`) evaluates to
-  // `0 || 4000` — a full four-second hold on every fresh page load for a
-  // state change nobody asked for. That accident was most of the "loading
-  // takes a while" in this ticket. Clamp; never coalesce on zero.
-  useEffect(() => {
-    if (!settling) return;
-    const id = setTimeout(() => setSettling(false), Math.max(0, settleUntil - Date.now()));
-    return () => clearTimeout(id);
-  }, [settling, settleUntil]);
-
   // Autoplay refused, or just very slow? After the grace window, say so and
   // point at the play button — there is no event for "never started".
   useEffect(() => {
@@ -424,7 +402,7 @@ export function CleanPlayer({
   const lineTone = live && !behindEdge ? "bg-tally" : "bg-amber";
 
   // The whole picture-cover decision, in one place and one call.
-  const cover = pictureCover({ phase, hasPlayed, settling, failure: Boolean(failure) });
+  const cover = pictureCover({ phase, hasPlayed, failure: Boolean(failure) });
   // "Press play" is only honest advice once there is a play button that
   // works — before `ready` the transport is disabled and the wait is ours.
   const label = coverLabel({ phase, hasPlayed, failure, stalled: stalled && ready });
@@ -435,11 +413,10 @@ export function CleanPlayer({
       if (!p) return;
       const target = Math.max(0, seconds);
       seekAimRef.current = target;
-      coverChrome();
       p.seekTo(target, true);
       setPosition(target);
     },
-    [coverChrome],
+    [],
   );
 
   const nudge = useCallback(
@@ -453,12 +430,9 @@ export function CleanPlayer({
   const toggle = useCallback(() => {
     const p = playerRef.current;
     if (!p) return;
-    // Cover the picture before asking, not after: YouTube paints its chrome
-    // the moment the state changes, ahead of any event reaching us.
-    coverChrome();
     if (playing) p.pauseVideo();
     else p.playVideo();
-  }, [playing, coverChrome]);
+  }, [playing]);
 
   const toggleMute = useCallback(() => {
     const p = playerRef.current;
@@ -482,11 +456,10 @@ export function CleanPlayer({
     // Landing exactly on the edge can trip ENDED; stop just short of it.
     const target = Math.max(0, (isFiniteNumber(edge) && edge > 0 ? edge : p.getDuration()) - 2);
     seekAimRef.current = null;
-    coverChrome();
     p.seekTo(target, true);
     p.playVideo();
     setPosition(target);
-  }, [edge, coverChrome]);
+  }, [edge]);
 
   const toggleFullscreen = useCallback(() => {
     const doc = document as FullscreenDocument;
@@ -717,71 +690,12 @@ export function CleanPlayer({
           }`}
         />
 
-        {/* The mask. It covers exactly where YouTube paints — its title bar
-            and its buttons across the top, its logo along the bottom, its
-            state disc in the middle — and nothing else, so the frozen frame
-            stays a frame.
-
-            Two tones. On a stopped picture the centre is a real disc with our
-            own glyph in it, which is what keeps the cover reading as the
-            player's own furniture rather than as a patch over a hole. While
-            the picture is still running and we are only riding out the few
-            seconds of chrome a resume or a seek raised, the glyph would be a
-            lie, so only the geometry stays. The scrims do not soften between
-            the two: YouTube's title bar is up for three of those four seconds
-            at full strength, and it has to be covered for all of them. */}
-        {cover === "mask" && (
-          <div
-            className="pointer-events-none absolute inset-0 transition-opacity duration-200"
-            aria-hidden="true"
-          >
-            {/* Each band is opaque across the part YouTube actually prints on
-                and only *then* starts fading. Measured against a real embed:
-                its title and avatar sit in the top 3–11% of the frame, and its
-                share button and logo in the bottom 2–11%. An earlier fade
-                looked softer and let the title read straight through it, which
-                is the whole failure this mask exists to prevent. */}
-            <div
-              className="absolute inset-x-0 top-0 h-[22%] min-h-[84px]"
-              style={{
-                background:
-                  "linear-gradient(to bottom, var(--color-ink) 0%, var(--color-ink) 62%, color-mix(in srgb, var(--color-ink) 72%, transparent) 82%, transparent 100%)",
-              }}
-            />
-            <div
-              className="absolute inset-x-0 bottom-0 h-[19%] min-h-[74px]"
-              style={{
-                background:
-                  "linear-gradient(to top, var(--color-ink) 0%, var(--color-ink) 62%, color-mix(in srgb, var(--color-ink) 66%, transparent) 82%, transparent 100%)",
-              }}
-            />
-            {/* `closest-side`, not the default `farthest-corner`: with the
-                latter the gradient only reaches transparent out at the
-                corners, so the box's own straight edges stay tinted and the
-                feather renders as a visible dark square. */}
-            {/* Measured, not guessed: dropping this to 40% for the settling
-                window — on the theory that a resume only flashes a ripple —
-                let YouTube's own pause glyph read straight through it. It
-                stays opaque in every state the mask covers. */}
-            <div
-              className="absolute top-1/2 left-1/2 grid aspect-square w-[30%] max-w-[190px] min-w-[86px] -translate-x-1/2 -translate-y-1/2 place-items-center"
-              style={{
-                background:
-                  "radial-gradient(circle closest-side, var(--color-ink) 0 56%, color-mix(in srgb, var(--color-ink) 84%, transparent) 78%, transparent 100%)",
-              }}
-            >
-              <span className="grid h-[58%] w-[58%] place-items-center rounded-full border border-edge bg-ink text-bone">
-                {maskGlyph(phase) === "pause" ? (
-                  <PauseIcon className="h-[34%] w-[34%]" />
-                ) : (
-                  // Nudged right by the triangle's own optical centre, which
-                  // is not its bounding box's.
-                  <PlayIcon className="ml-[6%] h-[34%] w-[34%]" />
-                )}
-              </span>
-            </div>
-          </div>
-        )}
+        {/* Nothing is laid over the picture. YouTube's own chrome used to be
+            answered here with scrims and a disc; measuring it with the cover
+            switched off showed a pause raises no chrome whatsoever, and that
+            everything a resume or a seek does raise fades itself out inside
+            three seconds. The cover was the artificial part — heavier than
+            what it hid, and up for longer. See `YT_CHROME_MS`. */}
 
         {/* A full cover survives in exactly two places, and both are places
             where there is no footage underneath worth keeping: a refusal, and
