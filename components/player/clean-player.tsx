@@ -210,6 +210,8 @@ export function CleanPlayer({
       }
       playerRef.current = null;
       // destroy() takes the iframe with it; this clears anything it left.
+      // Safe only because React renders no children into this host — clearing
+      // a node React owns makes its own removal throw NotFoundError later.
       host.replaceChildren();
     };
   }, [videoId, start]);
@@ -436,10 +438,14 @@ export function CleanPlayer({
         )}
       </header>
 
-      <div
-        ref={frameRef}
-        className="player-frame relative aspect-video border border-edge-soft bg-black [&>iframe]:h-full [&>iframe]:w-full"
-      >
+      <div className="player-frame relative aspect-video border border-edge-soft bg-black">
+        {/* The IFrame API mutates this node's children, so React must own
+            nothing inside it — anything else here belongs to the box above. */}
+        <div
+          ref={frameRef}
+          className="absolute inset-0 [&>iframe]:h-full [&>iframe]:w-full"
+        />
+
         {/* Status text only — no control ever sits over the frame. */}
         {(!ready || failure) && (
           <div className="pointer-events-none absolute inset-0 grid place-items-center px-6">
