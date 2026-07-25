@@ -210,9 +210,20 @@ function Monitor({
  * while it is still warming up. Neither belongs on the wall.
  *
  * The chrome lives inside a cross-origin iframe, so it can't be removed; it
- * can only be kept from being summoned. A slate covers the warm-up, and the
- * link on top eats every hover and click — doubling as the tile's own click
- * target, which the poster mode already had.
+ * can only be kept from being summoned. The link on top eats every hover and
+ * click — doubling as the tile's own click target, which the poster mode
+ * already had — and the tile's own thumbnail covers the warm-up.
+ *
+ * That warm-up cover used to be a black slate, which is the "tuning in" black
+ * screen this ticket is about. It is now the stream's own poster: the same
+ * image the poster mode shows, so switching modes no longer flashes black and
+ * the tile is never a hole in the wall.
+ *
+ * The reveal is still a timer rather than an event, and that is a real
+ * limitation worth stating: these tiles are raw iframes with no `enablejsapi`,
+ * so there is no PLAYING event to listen for. Giving a dozen tiles a live
+ * `YT.Player` each is a bigger change than this ticket, and it costs more than
+ * it buys now that what sits under the timer is a picture rather than black.
  */
 function MonitorFrame({ stream }: { stream: Stream }) {
   const [warm, setWarm] = useState(false);
@@ -231,14 +242,23 @@ function MonitorFrame({ stream }: { stream: Stream }) {
         src={`https://www.youtube-nocookie.com/embed/${stream.videoId}?autoplay=1&mute=1&controls=0&rel=0&iv_load_policy=3&playsinline=1`}
         title={stream.title}
         allow="autoplay; encrypted-media; picture-in-picture"
+        // A four-wide grid mounts a dozen autoplaying embeds at once and
+        // saturates the connection pool; off-screen tiles wait their turn.
+        loading="lazy"
         className="absolute inset-0 h-full w-full"
       />
       {!warm && (
-        <div className="absolute inset-0 grid place-items-center bg-ink">
-          <span className="font-mono text-[10px] tracking-[0.18em] text-faint uppercase">
+        <>
+          <img
+            src={stream.thumbnail}
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+          <span className="absolute bottom-2 left-2 border border-edge bg-ink/85 px-1.5 py-0.5 font-mono text-[9px] tracking-[0.16em] text-bone uppercase">
             Tuning in…
           </span>
-        </div>
+        </>
       )}
       <Link
         href={`/watch/${stream.videoId}`}

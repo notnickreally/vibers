@@ -81,6 +81,28 @@ export function thumbnailUrl(source: YouTubeSource): string {
   return `https://i.ytimg.com/vi/${source.id}/hqdefault.jpg`;
 }
 
+/**
+ * The poster that stands in for the picture until there is one.
+ *
+ * Variant matters more than it looks. `maxresdefault` is missing for most live
+ * streams and 404s on the critical path; `hqdefault` exists everywhere but is
+ * 480×360 with 4:3 pillarbox bars *baked into the image*, so it cannot be
+ * dropped into a 16:9 box. `hq720` is a true 16:9 frame, and `mqdefault` is
+ * the 16:9 variant that always exists — so: try one, fall back to the other.
+ *
+ * Checked against i.ytimg.com rather than assumed: `hq720` is a 200 for
+ * `dQw4w9WgXcQ` and a 404 for `jNQXAC9IVRw`, while `mqdefault` is a 200 for
+ * both. The fallback is load-bearing, not defensive.
+ */
+export function posterUrl(videoId: string): string {
+  return `https://i.ytimg.com/vi/${videoId}/hq720.jpg`;
+}
+
+/** The 16:9 poster that is always present, for when `posterUrl` 404s. */
+export function posterFallbackUrl(videoId: string): string {
+  return `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
+}
+
 const KEY_PREFIX = "vibers:stream:";
 
 export function loadSource(handle: string): YouTubeSource | null {

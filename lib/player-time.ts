@@ -13,14 +13,104 @@
 export const DEFAULT_DVR_SECONDS = 4 * 60 * 60;
 
 /**
- * How long YouTube keeps its own chrome on screen after a state change.
+ * How long YouTube keeps its own chrome on screen after a state change *while
+ * it goes on playing*.
  *
- * Measured, not guessed: pause, resume or an API seek all raise the title bar,
- * the centred state disc, "More videos" and the logo, and they are still up at
- * 3s and gone by 4s. Nothing outside the iframe can dismiss them early, so the
- * slate that hides them has to outlast them.
+ * Measured, not guessed: a resume or an API seek raises the title bar, the
+ * centred state disc, "More videos" and the logo, and they are still up at 3s
+ * and gone by 4s. Nothing outside the iframe can dismiss them early, so the
+ * mask that hides them has to outlast them.
+ *
+ * Note what this window does *not* cover: while the player sits in PAUSED the
+ * chrome does not time out at all — it stays until playback resumes. That is
+ * why `pictureCover` masks a paused picture on the phase rather than on a
+ * timer.
  */
 export const YT_CHROME_MS = 4000;
+
+/**
+ * How long we wait for a picture before deciding autoplay was refused.
+ *
+ * Safari, iOS Low Power Mode and any tab without an engagement signal leave
+ * the player parked at CUED forever. Nothing errors — it just never starts —
+ * so the only way to know is to stop waiting.
+ */
+export const AUTOPLAY_GRACE_MS = 6000;
+
+/**
+ * Where the player is, as far as the picture is concerned.
+ *
+ * Deliberately separate from the `playing` flag that drives the transport
+ * controls: that one folds BUFFERING into PLAYING so a seek doesn't flicker
+ * the play icon, which is exactly the distinction the picture needs to keep.
+ */
+export type Phase = "cold" | "cued" | "buffering" | "playing" | "paused" | "ended";
+
+/**
+ * What, if anything, goes over the picture.
+ *
+ * - `poster`  — the video's own frame, before there is any decoded picture.
+ * - `mask`    — the two rectangles YouTube paints in, and nothing else.
+ * - `none`    — the picture, uncovered.
+ * - `slate`   — a full cover. Only where there is no footage left to protect.
+ */
+export type Cover = "poster" | "mask" | "none" | "slate";
+
+export interface CoverInput {
+  phase: Phase;
+  /** Set once the player has reported PLAYING at least once. */
+  hasPlayed: boolean;
+  /** True inside the `YT_CHROME_MS` window after something we asked for. */
+  settling: boolean;
+  /** A refusal from YouTube — an embed ban, or a video that won't play. */
+  failure?: boolean;
+}
+
+/**
+ * The whole picture-cover decision, in one total function.
+ *
+ * The rule the ticket bought: the footage is never hidden as a whole. A frame
+ * that exists is shown — masked over the two places YouTube paints, never
+ * blacked out. A frame that does not exist yet is stood in for by the poster,
+ * and a frame that is gone for good gets a slate.
+ */
+export function pictureCover({ phase, hasPlayed, settling, failure }: CoverInput): Cover {
+  // Nothing to protect: YouTube paints an error card or an end-screen grid of
+  // suggestions over the whole frame, and there is no footage under either.
+  if (failure) return "slate";
+  if (phase === "ended") return "slate";
+
+  // No decoded picture yet — the poster is the only real frame we have. A
+  // *mid-stream* stall is a different thing entirely and must not slam the
+  // cover art over live footage, which is what `hasPlayed` separates.
+  if (!hasPlayed && phase !== "playing") return "poster";
+
+  // Stopped: the disc, the title bar and the avatar are up and will stay up.
+  if (phase === "paused" || phase === "cued" || phase === "cold") return "mask";
+
+  // Playing, but a resume or a seek just raised the chrome for a few seconds.
+  return settling ? "mask" : "none";
+}
+
+/** The words that go with a cover. Short enough to sit in a corner badge. */
+export function coverLabel({
+  phase,
+  hasPlayed,
+  failure,
+  stalled,
+}: {
+  phase: Phase;
+  hasPlayed: boolean;
+  failure?: string;
+  /** No picture after `AUTOPLAY_GRACE_MS` — autoplay was almost certainly refused. */
+  stalled?: boolean;
+}): string {
+  if (failure) return failure;
+  if (phase === "ended") return "Stream ended";
+  if (phase === "paused") return "Paused";
+  if (!hasPlayed) return stalled ? "Press play to start" : "Tuning in…";
+  return "";
+}
 
 /** Within this many seconds of the edge, a live viewer counts as "live". */
 export const LIVE_EDGE_SLACK = 12;

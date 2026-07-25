@@ -35,7 +35,15 @@ async function fromOEmbed(id: string): Promise<Metadata | null> {
     `https://www.youtube.com/watch?v=${id}`,
   )}&format=json`;
 
-  const res = await fetch(target, { headers: { accept: "application/json" } });
+  // A video's title, channel and thumbnail do not change minute to minute, so
+  // this leg is cached — it is pure latency on the way to painting the page.
+  // `enrich` below is deliberately left uncached: concurrent viewers and
+  // whether a stream is still live are exactly the things that must be true
+  // right now, and the route stays dynamic for them.
+  const res = await fetch(target, {
+    headers: { accept: "application/json" },
+    next: { revalidate: 300 },
+  });
   if (!res.ok) return null;
 
   const data = (await res.json()) as {

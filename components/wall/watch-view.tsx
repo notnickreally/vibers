@@ -65,7 +65,12 @@ export function WatchView({ videoId }: { videoId: string }) {
   return (
     <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="min-w-0">
-        <CleanPlayer videoId={videoId} isLive={stream?.isLive} title={stream?.title} />
+        <CleanPlayer
+          videoId={videoId}
+          isLive={stream?.isLive}
+          title={stream?.title}
+          channel={stream?.channel}
+        />
 
         {/* Everything YouTube would have put on the picture, put underneath.
             The title and the live lamp live in the player's own title strip

@@ -34,6 +34,19 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${bricolage.variable} ${instrument.variable} ${jetbrains.variable}`}>
+      <head>
+        {/* Every picture on this site comes from YouTube, so the handshakes
+            are worth paying for up front. `s.ytimg.com` is the one that
+            matters most and is easiest to forget: the embed's own script and
+            CSS bundle come from there and sit directly on the critical path,
+            ahead of the first video byte. Deliberately *not* here:
+            googlevideo.com, whose media hosts are per-request
+            (rr3---sn-….googlevideo.com), so an apex preconnect buys nothing. */}
+        <link rel="preconnect" href="https://s.ytimg.com" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://www.youtube.com" />
+        <link rel="preconnect" href="https://i.ytimg.com" />
+        <link rel="dns-prefetch" href="https://www.youtube-nocookie.com" />
+      </head>
       <body className="min-h-screen">
         <a
           href="#main"
