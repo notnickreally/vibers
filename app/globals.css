@@ -169,6 +169,25 @@
     }
   }
 
+  /* Fullscreen keeps the shape it has everywhere else: title strip, picture,
+     controls — stacked, with the picture taking whatever room is left. The
+     controls stay *below* the video here too; nothing floats over it. */
+  .player-shell:fullscreen,
+  .player-shell:-webkit-full-screen {
+    display: flex;
+    flex-direction: column;
+    width: 100vw;
+    height: 100vh;
+    background-color: var(--color-ink);
+  }
+
+  .player-shell:fullscreen .player-frame,
+  .player-shell:-webkit-full-screen .player-frame {
+    flex: 1 1 auto;
+    min-height: 0;
+    aspect-ratio: auto;
+  }
+
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: var(--color-edge) transparent;

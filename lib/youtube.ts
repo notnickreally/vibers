@@ -17,7 +17,7 @@ function parseStart(value: string | null): number | undefined {
   // YouTube writes timestamps as either "90" or "1h2m30s".
   if (/^\d+$/.test(value)) return Number(value);
   const m = value.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
-  if (!m || !m[0]) return undefined;
+  if (!m?.[0]) return undefined;
   const [, h, min, s] = m;
   const total = Number(h ?? 0) * 3600 + Number(min ?? 0) * 60 + Number(s ?? 0);
   return total > 0 ? total : undefined;

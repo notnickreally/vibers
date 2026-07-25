@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { CleanPlayer } from "@/components/player/clean-player";
 import { ErrorState } from "@/components/states";
-import { LiveBadge } from "@/components/ui/bits";
 import { compact } from "@/lib/format";
 import { addStream, findStream, listStreams, lookup, type Stream } from "@/lib/stream";
 
@@ -66,12 +65,13 @@ export function WatchView({ videoId }: { videoId: string }) {
   return (
     <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="min-w-0">
-        <CleanPlayer videoId={videoId} isLive={stream?.isLive} />
+        <CleanPlayer videoId={videoId} isLive={stream?.isLive} title={stream?.title} />
 
-        {/* Everything YouTube would have put on the picture, put underneath. */}
+        {/* Everything YouTube would have put on the picture, put underneath.
+            The title and the live lamp live in the player's own title strip
+            above the picture, so they are not repeated here. */}
         <div className="mt-5">
           <div className="flex flex-wrap items-center gap-3">
-            {stream?.isLive && <LiveBadge />}
             {stream?.viewers !== undefined && (
               <span className="font-mono text-[11px] text-muted tabular-nums">
                 {compact(stream.viewers)} watching
@@ -93,11 +93,7 @@ export function WatchView({ videoId }: { videoId: string }) {
             </Link>
           </div>
 
-          <h1 className="mt-4 font-display text-2xl leading-snug font-semibold text-bone sm:text-3xl">
-            {stream?.title ?? "Loading…"}
-          </h1>
-
-          <div className="mt-3 flex flex-wrap items-center gap-3">
+          <div className="mt-4 flex flex-wrap items-center gap-3">
             {stream?.channelUrl ? (
               <a
                 href={stream.channelUrl}

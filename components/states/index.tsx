@@ -11,12 +11,13 @@ import type { ReactNode } from "react";
 export function WallSkeleton({ count = 6 }: { count?: number }) {
   return (
     <div
+      role="status"
       className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3"
       aria-busy="true"
       aria-label="Loading streams"
     >
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="border border-edge-soft bg-panel">
+      {Array.from({ length: count }, (_, i) => `tile-${i}`).map((key) => (
+        <div key={key} className="border border-edge-soft bg-panel">
           <div className="flex items-center gap-2 border-b border-edge-soft bg-ink-2 px-2.5 py-1.5">
             <div className="shimmer h-3.5 w-14" />
           </div>
