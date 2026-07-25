@@ -6,6 +6,8 @@
  * persists across visits, and it does not sync between devices.
  */
 
+import { clearMessages } from "./chat";
+
 export interface Stream {
   videoId: string;
   title: string;
@@ -51,6 +53,9 @@ export function addStream(meta: Metadata): Stream[] {
 }
 
 export function removeStream(videoId: string): Stream[] {
+  // A stream's chat is stored under its own key, so taking it off the wall has
+  // to take the transcript with it — otherwise the keys accumulate forever.
+  clearMessages(videoId);
   const next = listStreams().filter((s) => s.videoId !== videoId);
   write(next);
   return next;
