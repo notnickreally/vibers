@@ -188,6 +188,78 @@
     aspect-ratio: auto;
   }
 
+  /* In fullscreen the controls stop stretching to the width of the screen —
+     a seek bar two metres long is not a better seek bar. */
+  .player-shell:fullscreen .player-controls,
+  .player-shell:-webkit-full-screen .player-controls {
+    width: 100%;
+    max-width: 1400px;
+    margin-inline: auto;
+    border-inline-color: transparent;
+  }
+
+  /* The volume slider. `accent-color` gets you the browser's own blue-grey
+     track with a fat native thumb, which is the one control on this player
+     that used to look borrowed. Drawn here to the same rules as the seek bar:
+     a hairline track, a small square-shouldered thumb, amber only. */
+  .volume-range {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 14px;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .volume-range:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+
+  /* WebKit has no `::-moz-range-progress`, so the filled part of the track is
+     painted from `--vol`, which the component sets to the current level. */
+  .volume-range::-webkit-slider-runnable-track {
+    height: 3px;
+    background: linear-gradient(
+      to right,
+      var(--color-amber) 0 var(--vol, 100%),
+      var(--color-edge) var(--vol, 100%) 100%
+    );
+  }
+
+  .volume-range::-moz-range-track {
+    height: 3px;
+    background: var(--color-edge);
+  }
+
+  .volume-range::-moz-range-progress {
+    height: 3px;
+    background: var(--color-amber);
+  }
+
+  .volume-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    margin-top: -3.5px;
+    border-radius: 999px;
+    background: var(--color-amber);
+    transition: transform 0.12s ease;
+  }
+
+  .volume-range::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--color-amber);
+  }
+
+  .volume-range:hover::-webkit-slider-thumb,
+  .volume-range:focus-visible::-webkit-slider-thumb {
+    transform: scale(1.2);
+  }
+
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: var(--color-edge) transparent;

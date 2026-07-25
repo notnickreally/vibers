@@ -247,19 +247,25 @@ function MonitorFrame({ stream }: { stream: Stream }) {
         loading="lazy"
         className="absolute inset-0 h-full w-full"
       />
-      {!warm && (
-        <>
-          <img
-            src={stream.thumbnail}
-            alt=""
-            aria-hidden="true"
-            className="absolute inset-0 h-full w-full object-cover"
-          />
-          <span className="absolute bottom-2 left-2 border border-edge bg-ink/85 px-1.5 py-0.5 font-mono text-[9px] tracking-[0.16em] text-bone uppercase">
-            Tuning in…
-          </span>
-        </>
-      )}
+      {/* The poster stays mounted and dissolves, so the hand-off to the first
+          decoded frame is a cross-fade rather than a hard cut to whatever the
+          embed happens to be showing at that instant. Same treatment as the
+          watch player's own poster, for the same reason. */}
+      <img
+        src={stream.thumbnail}
+        alt=""
+        aria-hidden="true"
+        className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ${
+          warm ? "opacity-0" : "opacity-100"
+        }`}
+      />
+      <span
+        className={`pointer-events-none absolute bottom-2 left-2 border border-edge bg-ink/85 px-1.5 py-0.5 font-mono text-[9px] tracking-[0.16em] text-bone uppercase transition-opacity duration-300 ${
+          warm ? "opacity-0" : "opacity-100"
+        }`}
+      >
+        Tuning in…
+      </span>
       <Link
         href={`/watch/${stream.videoId}`}
         aria-label={`Watch ${stream.title}`}

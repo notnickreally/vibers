@@ -3,33 +3,23 @@ import { coverLabel, type Cover, type Phase, pictureCover } from "./player-time"
 import { posterFallbackUrl, posterUrl } from "./youtube";
 
 /**
- * The rule this whole ticket bought, stated once as a test: the footage is
- * never hidden as a whole. Anything that returns "slate" for a phase with a
- * frame under it is a regression, and that is what the matrix below pins.
+ * The rule, stated once as a test: a frame that exists is shown, and nothing
+ * is laid over it. Anything that returns "slate" for a phase with a frame
+ * under it is a regression, and that is what the matrix below pins.
  */
 
 const PHASES: Phase[] = ["cold", "cued", "buffering", "playing", "paused", "ended"];
 
-function cover(
-  phase: Phase,
-  opts: { hasPlayed?: boolean; settling?: boolean; failure?: boolean } = {},
-): Cover {
-  return pictureCover({
-    phase,
-    hasPlayed: opts.hasPlayed ?? false,
-    settling: opts.settling ?? false,
-    failure: opts.failure,
-  });
+function cover(phase: Phase, opts: { hasPlayed?: boolean; failure?: boolean } = {}): Cover {
+  return pictureCover({ phase, hasPlayed: opts.hasPlayed ?? false, failure: opts.failure });
 }
 
 describe("pictureCover", () => {
-  it("never blacks out a phase that has a frame under it", () => {
+  it("lays nothing at all over a phase that has a frame under it", () => {
     // The acceptance check, as a check. Every phase that can have decoded
-    // footage behind it, in every combination of the other two inputs.
+    // footage behind it shows that footage, uncovered.
     for (const phase of ["buffering", "playing", "paused"] as Phase[]) {
-      for (const settling of [false, true]) {
-        expect(cover(phase, { hasPlayed: true, settling })).not.toBe("slate");
-      }
+      expect(cover(phase, { hasPlayed: true })).toBe("none");
     }
   });
 
@@ -50,21 +40,18 @@ describe("pictureCover", () => {
     expect(cover("playing", { hasPlayed: true })).toBe("none");
   });
 
-  it("masks a running picture only while a state change is settling", () => {
-    expect(cover("playing", { hasPlayed: true, settling: true })).toBe("mask");
+  it("leaves a paused picture completely alone", () => {
+    // Measured against a real embed with the old cover switched off: pausing
+    // raises no YouTube chrome whatsoever, at 1.5s or at 8s. There is nothing
+    // here to cover, and a cover would be the only thing on the picture.
+    expect(cover("paused", { hasPlayed: true })).toBe("none");
   });
 
-  it("masks a paused picture rather than blacking it out", () => {
-    // The headline requirement: paused freezes on the frame, and the frame
-    // stays visible. A mask covers where YouTube paints; it is not a slate.
-    expect(cover("paused", { hasPlayed: true })).toBe("mask");
-    expect(cover("paused", { hasPlayed: true, settling: true })).toBe("mask");
-  });
-
-  it("keeps masking a paused picture no matter how long it sits there", () => {
-    // Pause chrome does not time out the way resume chrome does, so the mask
-    // must come off the phase and never off the settling window.
-    expect(cover("paused", { hasPlayed: true, settling: false })).toBe("mask");
+  it("leaves a resume or a seek to settle on its own", () => {
+    // The chrome a state change does raise fades itself out inside three
+    // seconds. Riding it out beats covering it.
+    expect(cover("playing", { hasPlayed: true })).toBe("none");
+    expect(cover("buffering", { hasPlayed: true })).toBe("none");
   });
 
   it("slates the two states with nothing left to protect", () => {
@@ -79,13 +66,11 @@ describe("pictureCover", () => {
   });
 
   it("is total over the whole input space", () => {
-    const allowed: Cover[] = ["poster", "mask", "none", "slate"];
+    const allowed: Cover[] = ["poster", "none", "slate"];
     for (const phase of PHASES) {
       for (const hasPlayed of [false, true]) {
-        for (const settling of [false, true]) {
-          for (const failure of [false, true]) {
-            expect(allowed).toContain(cover(phase, { hasPlayed, settling, failure }));
-          }
+        for (const failure of [false, true]) {
+          expect(allowed).toContain(cover(phase, { hasPlayed, failure }));
         }
       }
     }
