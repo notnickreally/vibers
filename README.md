@@ -50,24 +50,43 @@ not by game. The boards rank ships, assists and one-shots — never followers.
 | `/clips` | Clips typed by what happened — ship, rescue, rabbit hole, one-shot |
 | `/leaderboard` | Ships, assists, one-shots, streaks |
 | `/go-live` | The broadcaster side: declare a goal, pick surfaces, wire setup |
+| `/report` | Takedown path for a creator whose video is playing on a run |
 | `/states` | Reference gallery of the six UI states the run list ships with |
 
 ## Playing a real stream
 
-Runs get their picture from YouTube. There are three ways to set one, all
-handled by `lib/youtube.ts` + `components/stream/stream-player.tsx`:
-
-- **Paste it on the run page** — the *Stream source* field under the frame.
-- **Carry it on a link** — `/watch/nocturne?v=<any YouTube URL or id>`, so a
-  shared link brings the feed with it.
-- **Set it when going live** — the URL field on `/go-live`; hitting the tally
-  opens your run page with that feed playing.
+Runs get their picture from YouTube — `lib/youtube.ts` +
+`components/stream/stream-player.tsx`. A broadcaster sets it either from the
+*Your feed* field under their own frame, from `/go-live` (hitting the tally
+opens the run playing), or by carrying it on a link as
+`/watch/<own handle>?v=<url or id>`.
 
 Every YouTube URL form is accepted (`watch?v=`, `youtu.be`, `/live/`, `/embed/`,
-`/shorts/`, a bare 11-character id), including `?t=` timestamps. The choice
+`/shorts/`, a bare 11-character id) including `?t=` timestamps. The choice
 persists per handle in `localStorage`. With no source set, the run falls back to
-the simulated editor canvas. Playback is muted so autoplay is allowed, and the
-embed uses `youtube-nocookie.com`.
+the simulated editor canvas.
+
+### Rules the player enforces
+
+These are deliberate and load-bearing — don't relax them without a reason:
+
+- **Opt-in only.** A feed can only be attached by the run's broadcaster. Viewers
+  get no source control, and a `?v=` link is *ignored* on someone else's run —
+  otherwise anyone could stage a stranger's stream as a vibers.tv run, complete
+  with a fabricated goal, viewer count and chat.
+- **The player is never modified.** Nothing is drawn over the iframe. The on-air
+  strip sits above it and the Prompt-Cam lower-third below, so YouTube's
+  controls, branding and ads are untouched. Playback starts muted because
+  autoplay requires it; the embed uses `youtube-nocookie.com`.
+- **Attribution travels with the video.** Every viewer sees that the picture is
+  hosted on YouTube, with a link back to the original.
+- **There is a takedown path.** `/report` takes a report without an account,
+  prefilled with the run, handle and video id from the run page's *Report feed*
+  button. Video is never re-hosted, so a request to remove the video itself
+  belongs with YouTube; this route removes the *run*.
+
+The signed-in viber is a constant in `lib/session.ts` (`CURRENT_VIBER`) since
+there's no auth yet — that's the seam where real ownership checks belong.
 
 ## Design system
 

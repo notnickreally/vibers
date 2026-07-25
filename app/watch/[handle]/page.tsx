@@ -10,6 +10,7 @@ import { WireFeed } from "@/components/stream/wire-feed";
 import { Avatar } from "@/components/ui/avatar";
 import { SectionHead, Stat, Tag } from "@/components/ui/bits";
 import { compact, shortDuration } from "@/lib/format";
+import { isOwnRun } from "@/lib/session";
 import {
   PROMPT_CAM,
   VIBERS,
@@ -65,6 +66,7 @@ export default async function WatchPage({ params }: { params: Promise<{ handle: 
             elapsed={run.elapsed}
             viewers={run.viewers}
             lowerThird={inFlight.text}
+            owned={isOwnRun(handle)}
           />
 
           {/* run header */}

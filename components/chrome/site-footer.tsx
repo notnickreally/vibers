@@ -17,6 +17,7 @@ const COLUMNS: { slate: string; links: { label: string; href: string }[] }[] = [
       { label: "Prompt-Cam setup", href: "/go-live" },
       { label: "Wire integrations", href: "/go-live" },
       { label: "Run rules", href: "/go-live" },
+      { label: "Report a feed", href: "/report" },
     ],
   },
   {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { StreamCanvas } from "@/components/stream/stream-canvas";
 import { LiveBadge } from "@/components/ui/bits";
 import { compact, timecode } from "@/lib/format";
@@ -14,13 +15,21 @@ import {
 } from "@/lib/youtube";
 
 /**
- * The picture. A viber points the run at a YouTube URL — a live stream, a
+ * The picture. A viber points their own run at a YouTube URL — a live stream, a
  * premiere or a VOD — and that becomes the broadcast. Until one is set, the run
  * falls back to the simulated editor canvas.
  *
- * The source arrives one of three ways: a `?v=` on the URL (so a link can carry
- * a stream), whatever the viber last set for this handle, or the field below the
- * frame. It is read after mount so the page itself stays static.
+ * Three rules this component exists to enforce:
+ *
+ * 1. **Opt-in.** Only the broadcaster can attach a feed to their own run. A
+ *    viewer gets no source control, and a crafted `?v=` link is ignored on
+ *    someone else's page — otherwise anyone could stage a stranger's stream as
+ *    a vibers.tv run.
+ * 2. **The player is never modified.** Nothing is drawn over the iframe; the
+ *    on-air strip sits above it and the lower-third below. YouTube's controls,
+ *    branding and ads stay entirely untouched.
+ * 3. **Attribution travels with the video** — every viewer sees where the
+ *    picture comes from and can report it.
  */
 export function StreamPlayer({
   handle,
@@ -28,12 +37,15 @@ export function StreamPlayer({
   elapsed: startElapsed,
   viewers: startViewers,
   lowerThird,
+  owned,
 }: {
   handle: string;
   code: string;
   elapsed: number;
   viewers: number;
   lowerThird: string;
+  /** True when the signed-in viber is the one broadcasting this run. */
+  owned: boolean;
 }) {
   const [source, setSource] = useState<YouTubeSource | null>(null);
   const [draft, setDraft] = useState("");
@@ -43,6 +55,9 @@ export function StreamPlayer({
   const [viewers, setViewers] = useState(startViewers);
 
   useEffect(() => {
+    // A feed can only ever be set by its broadcaster, so a `?v=` link is only
+    // honoured on your own run.
+    if (!owned) return;
     const fromUrl = new URLSearchParams(window.location.search).get("v");
     const parsed = fromUrl ? parseYouTube(fromUrl) : null;
     if (parsed) {
@@ -51,7 +66,7 @@ export function StreamPlayer({
       return;
     }
     setSource(loadSource(handle));
-  }, [handle]);
+  }, [handle, owned]);
 
   useEffect(() => {
     if (!source) return;
@@ -83,44 +98,9 @@ export function StreamPlayer({
     setEditing(false);
   }
 
-  return (
-    <div>
-      {source ? (
-        <div className="border border-edge-soft bg-[#0c0812]">
-          <div className="relative aspect-video">
-            <iframe
-              key={source.id}
-              src={embedUrl(source)}
-              title={`${code} — live from @${handle}`}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-              className="absolute inset-0 h-full w-full"
-            />
-            {/* On-air overlay. pointer-events-none so the player stays usable. */}
-            <div className="pointer-events-none absolute top-3 left-3 flex flex-wrap items-center gap-2">
-              <LiveBadge />
-              <span className="bg-ink/75 px-1.5 py-0.5 font-mono text-[10px] text-muted tabular-nums">
-                {timecode(elapsed)}
-              </span>
-              <span className="bg-ink/75 px-1.5 py-0.5 font-mono text-[10px] text-muted tabular-nums">
-                {compact(viewers)} watching
-              </span>
-            </div>
-          </div>
-
-          {/* Lower-third sits under the frame in video mode, so it never covers
-              YouTube's own controls. */}
-          <div className="border-t border-amber/30 bg-ink-2 px-4 py-3">
-            <p className="font-mono text-[10px] tracking-[0.18em] text-amber uppercase">
-              @{handle} is prompting
-            </p>
-            <p className="mt-1 font-mono text-[12px] leading-snug text-bone sm:text-[13px]">
-              {lowerThird}
-              <span className="caret" aria-hidden />
-            </p>
-          </div>
-        </div>
-      ) : (
+  if (!source) {
+    return (
+      <div>
         <StreamCanvas
           handle={handle}
           code={code}
@@ -128,21 +108,103 @@ export function StreamPlayer({
           viewers={startViewers}
           lowerThird={lowerThird}
         />
-      )}
+        {owned && (
+          <SourceForm
+            draft={draft}
+            invalid={invalid}
+            onChange={(v) => {
+              setDraft(v);
+              setInvalid(false);
+            }}
+            onSubmit={apply}
+          />
+        )}
+      </div>
+    );
+  }
 
-      {/* ------------------------------------------------------ source control */}
-      <div className="mt-2 border border-edge-soft bg-panel px-3 py-2">
-        {source && !editing ? (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <p className="eyebrow shrink-0">Stream source</p>
-            <a
-              href={watchUrl(source)}
-              target="_blank"
-              rel="noreferrer"
-              className="min-w-0 flex-1 truncate font-mono text-[11px] text-teal hover:underline"
-            >
+  const reportHref = `/report?run=${encodeURIComponent(code)}&handle=${encodeURIComponent(
+    handle,
+  )}&v=${encodeURIComponent(source.id)}`;
+
+  return (
+    <div>
+      {/* On-air strip — above the frame, so nothing is drawn over the player. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border border-b-0 border-edge-soft bg-ink-2 px-3 py-2">
+        <LiveBadge />
+        <span className="font-mono text-[11px] text-muted tabular-nums">{timecode(elapsed)}</span>
+        <span className="font-mono text-[11px] text-muted tabular-nums">
+          {compact(viewers)} watching
+        </span>
+        <span className="ml-auto font-mono text-[10px] tracking-[0.14em] text-faint">{code}</span>
+      </div>
+
+      <div className="relative aspect-video border-x border-edge-soft bg-[#0c0812]">
+        <iframe
+          key={source.id}
+          src={embedUrl(source)}
+          title={`${code} — live from @${handle}`}
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen
+          className="absolute inset-0 h-full w-full"
+        />
+      </div>
+
+      {/* Lower-third, beneath the frame. */}
+      <div className="border border-t-amber/30 border-edge-soft bg-ink-2 px-4 py-3">
+        <p className="font-mono text-[10px] tracking-[0.18em] text-amber uppercase">
+          @{handle} is prompting
+        </p>
+        <p className="mt-1 font-mono text-[12px] leading-snug text-bone sm:text-[13px]">
+          {lowerThird}
+          <span className="caret" aria-hidden />
+        </p>
+      </div>
+
+      {/* Attribution — shown to every viewer, not just the broadcaster. */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 border border-edge-soft bg-panel px-3 py-2">
+        <p className="eyebrow shrink-0">Picture</p>
+        <p className="min-w-0 flex-1 font-mono text-[11px] text-faint">
+          Hosted on YouTube by its creator. vibers.tv plays the original video and
+          does not modify or re-host it.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <a
+            href={watchUrl(source)}
+            target="_blank"
+            rel="noreferrer"
+            className="border border-edge px-2.5 py-1 font-mono text-[10px] tracking-[0.1em] text-teal uppercase transition-colors hover:border-teal"
+          >
+            Watch on YouTube ↗
+          </a>
+          <Link
+            href={reportHref}
+            className="border border-edge px-2.5 py-1 font-mono text-[10px] tracking-[0.1em] text-muted uppercase transition-colors hover:border-del hover:text-del"
+          >
+            Report feed
+          </Link>
+        </div>
+      </div>
+
+      {/* Broadcaster-only controls. */}
+      {owned &&
+        (editing ? (
+          <SourceForm
+            draft={draft}
+            invalid={invalid}
+            onCancel={() => setEditing(false)}
+            onChange={(v) => {
+              setDraft(v);
+              setInvalid(false);
+            }}
+            onSubmit={apply}
+          />
+        ) : (
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 border border-edge-soft bg-panel px-3 py-2">
+            <p className="eyebrow shrink-0">Your feed</p>
+            <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted">
               youtube.com/watch?v={source.id}
-            </a>
+            </p>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -160,48 +222,60 @@ export function StreamPlayer({
               </button>
             </div>
           </div>
-        ) : (
-          <form onSubmit={apply} className="flex flex-wrap items-center gap-2">
-            <label htmlFor="stream-src" className="eyebrow shrink-0">
-              Stream source
-            </label>
-            <input
-              id="stream-src"
-              value={draft}
-              onChange={(e) => {
-                setDraft(e.target.value);
-                setInvalid(false);
-              }}
-              placeholder="Paste a YouTube link — live stream, premiere or VOD"
-              className={`min-w-0 flex-1 border bg-ink px-2.5 py-1.5 font-mono text-[11px] text-bone placeholder:text-faint focus:outline-none ${
-                invalid ? "border-del" : "border-edge focus:border-teal"
-              }`}
-            />
-            <button
-              type="submit"
-              className="bg-amber px-3 py-1.5 font-mono text-[10px] font-semibold tracking-[0.12em] text-ink uppercase transition-colors hover:bg-bone"
-            >
-              Take feed
-            </button>
-            {source && (
-              <button
-                type="button"
-                onClick={() => setEditing(false)}
-                className="px-2 font-mono text-[10px] tracking-[0.1em] text-muted uppercase hover:text-bone"
-              >
-                Cancel
-              </button>
-            )}
-          </form>
+        ))}
+    </div>
+  );
+}
+
+function SourceForm({
+  draft,
+  invalid,
+  onChange,
+  onSubmit,
+  onCancel,
+}: {
+  draft: string;
+  invalid: boolean;
+  onChange: (value: string) => void;
+  onSubmit: (e: React.FormEvent) => void;
+  onCancel?: () => void;
+}) {
+  return (
+    <div className="mt-2 border border-edge-soft bg-panel px-3 py-2">
+      <form onSubmit={onSubmit} className="flex flex-wrap items-center gap-2">
+        <label htmlFor="stream-src" className="eyebrow shrink-0">
+          Your feed
+        </label>
+        <input
+          id="stream-src"
+          value={draft}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Paste the YouTube link you're broadcasting to"
+          className={`min-w-0 flex-1 border bg-ink px-2.5 py-1.5 font-mono text-[11px] text-bone placeholder:text-faint focus:outline-none ${
+            invalid ? "border-del" : "border-edge focus:border-teal"
+          }`}
+        />
+        <button
+          type="submit"
+          className="bg-amber px-3 py-1.5 font-mono text-[10px] font-semibold tracking-[0.12em] text-ink uppercase transition-colors hover:bg-bone"
+        >
+          Take feed
+        </button>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-2 font-mono text-[10px] tracking-[0.1em] text-muted uppercase hover:text-bone"
+          >
+            Cancel
+          </button>
         )}
-        <p className={`mt-1.5 font-mono text-[10px] ${invalid ? "text-del" : "text-faint"}`}>
-          {invalid
-            ? "That isn't a YouTube link. Try a youtube.com/watch, youtu.be or /live/ URL."
-            : source
-              ? "Playing muted — unmute in the player. Share this page with ?v= to carry the feed."
-              : "Any youtube.com/watch, youtu.be, /live/ or /shorts/ link works."}
-        </p>
-      </div>
+      </form>
+      <p className={`mt-1.5 font-mono text-[10px] ${invalid ? "text-del" : "text-faint"}`}>
+        {invalid
+          ? "That isn't a YouTube link. Try a youtube.com/watch, youtu.be or /live/ URL."
+          : "Only your own stream. Attaching someone else's broadcast to a run is not allowed."}
+      </p>
     </div>
   );
 }

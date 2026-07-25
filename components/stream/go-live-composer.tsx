@@ -64,7 +64,8 @@ export function GoLiveComposer() {
           <p className="mt-2 text-sm text-muted">
             Paste the YouTube URL you&apos;re broadcasting to — a live stream, a premiere,
             or a recorded run. That video becomes the picture on your run page, with the
-            Prompt-Cam and the Wire layered around it.
+            Prompt-Cam and the Wire around it. It has to be your own stream: feeds can only
+            be attached by the person broadcasting them.
           </p>
           <input
             id="feed"

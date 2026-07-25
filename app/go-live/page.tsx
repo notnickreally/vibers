@@ -10,7 +10,11 @@ export const metadata: Metadata = {
 const RULES = [
   {
     slate: "Bring your own picture",
-    body: "Point the run at the YouTube URL you're already broadcasting to. vibers.tv wraps it in the Prompt-Cam, the Wire and chat — it doesn't re-encode your video.",
+    body: "Point the run at the YouTube URL you're already broadcasting to. vibers.tv wraps it in the Prompt-Cam, the Wire and chat — it doesn't re-encode or re-host your video.",
+  },
+  {
+    slate: "Your stream only",
+    body: "A feed can only be attached by the person broadcasting it. Nobody can stage someone else's stream as a run, and every run links back to the video it's playing.",
   },
   {
     slate: "Goal first",
