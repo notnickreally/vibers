@@ -9,6 +9,10 @@ export const metadata: Metadata = {
 
 const RULES = [
   {
+    slate: "Bring your own picture",
+    body: "Point the run at the YouTube URL you're already broadcasting to. vibers.tv wraps it in the Prompt-Cam, the Wire and chat — it doesn't re-encode your video.",
+  },
+  {
     slate: "Goal first",
     body: "A run needs a stated goal before the tally goes on, and it is locked for the duration. Runs without one are unlisted.",
   },
@@ -30,7 +34,10 @@ const WIRE_SETUP = `# point the wire at the repo you're about to break
 npx vibers wire link ./my-repo
 
 # stream prompts + diffs while you work
-npx vibers run start --goal "rip out the ORM" --tool claude-code`;
+npx vibers run start \\
+  --goal "rip out the ORM" \\
+  --tool claude-code \\
+  --feed https://www.youtube.com/live/YOUR_STREAM`;
 
 export default function GoLivePage() {
   return (
@@ -49,9 +56,11 @@ export default function GoLivePage() {
           {/* min-w-0: the setup snippet is pre-formatted and would widen the grid. */}
           <div className="min-w-0">
             <p className="text-[15px] leading-relaxed text-muted">
-              The wire is a local process. It watches your repo for commits, test runs and
-              deploys, and forwards the diff stat — never file contents — to the run page.
-              The Prompt-Cam hooks your coding tool and mirrors each prompt as you send it.
+              Video stays on YouTube — stream there as you normally would and give the run
+              its URL. The wire is a separate local process: it watches your repo for
+              commits, test runs and deploys and forwards the diff stat — never file
+              contents — to the run page. The Prompt-Cam hooks your coding tool and mirrors
+              each prompt as you send it.
             </p>
             <pre className="scrollbar-thin mt-5 overflow-x-auto border border-edge-soft bg-ink p-4 font-mono text-[12px] leading-relaxed text-bone/90">
               {WIRE_SETUP}

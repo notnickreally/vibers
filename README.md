@@ -27,6 +27,7 @@ appeal, and the product refuses to hide them.
 
 | Surface | What it does |
 | --- | --- |
+| **The picture** | A run points at a YouTube URL — live stream, premiere or VOD — and that video *is* the broadcast. vibers.tv wraps it rather than re-encoding it. |
 | **Prompt-Cam** | Every prompt appears as it's typed, with token counts. The prompt is the performance. |
 | **The Wire** | Commits, test runs, reverts and deploys stream out of the editor as they land — per run, and network-wide as a ticker. |
 | **Co-prompt** | Chat files prompt suggestions and votes them up. The viber adopts or declines; an adopted prompt is credited to its author permanently and counts toward their assists. |
@@ -50,6 +51,23 @@ not by game. The boards rank ships, assists and one-shots — never followers.
 | `/leaderboard` | Ships, assists, one-shots, streaks |
 | `/go-live` | The broadcaster side: declare a goal, pick surfaces, wire setup |
 | `/states` | Reference gallery of the six UI states the run list ships with |
+
+## Playing a real stream
+
+Runs get their picture from YouTube. There are three ways to set one, all
+handled by `lib/youtube.ts` + `components/stream/stream-player.tsx`:
+
+- **Paste it on the run page** — the *Stream source* field under the frame.
+- **Carry it on a link** — `/watch/nocturne?v=<any YouTube URL or id>`, so a
+  shared link brings the feed with it.
+- **Set it when going live** — the URL field on `/go-live`; hitting the tally
+  opens your run page with that feed playing.
+
+Every YouTube URL form is accepted (`watch?v=`, `youtu.be`, `/live/`, `/embed/`,
+`/shorts/`, a bare 11-character id), including `?t=` timestamps. The choice
+persists per handle in `localStorage`. With no source set, the run falls back to
+the simulated editor canvas. Playback is muted so autoplay is allowed, and the
+embed uses `youtube-nocookie.com`.
 
 ## Design system
 
@@ -93,5 +111,6 @@ catalogued at `/states`:
 
 ## Not built yet
 
-Real streaming transport (WebRTC/HLS), auth, persistence, and the `vibers wire`
-local agent that would feed real diffs into a run.
+Auth, persistence, and the `vibers wire` local agent that would feed real
+prompts and diffs into a run. Video is delegated to YouTube by design — there is
+no plan to run our own transport.

@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { LiveBadge, Poster } from "@/components/ui/bits";
 import type { Tool } from "@/lib/mock/types";
+import { parseYouTube, thumbnailUrl } from "@/lib/youtube";
 
 const TOOLS: Tool[] = ["Claude Code", "Cursor", "Codex", "Zed", "Windsurf"];
 const STACKS = ["Next.js", "Rust", "Python", "Swift", "Godot", "Solidity", "Go", "Three.js"];
@@ -14,13 +16,20 @@ const STACKS = ["Next.js", "Rust", "Python", "Swift", "Godot", "Solidity", "Go",
  */
 export function GoLiveComposer() {
   const [goal, setGoal] = useState("");
+  const [feed, setFeed] = useState("");
+  // A private or mistyped id has no thumbnail; fall back to the plain poster.
+  const [posterFailed, setPosterFailed] = useState(false);
   const [tool, setTool] = useState<Tool>("Claude Code");
   const [stacks, setStacks] = useState<string[]>(["Next.js"]);
   const [promptCam, setPromptCam] = useState(true);
   const [wire, setWire] = useState(true);
   const [coPrompt, setCoPrompt] = useState(true);
 
+  const source = parseYouTube(feed);
+  const feedTouched = feed.trim().length > 0;
   const ready = goal.trim().length >= 12;
+  // Going live routes to your own run page, carrying the feed on the URL.
+  const tallyHref = source ? `/watch/nocturne?v=${source.id}` : "/watch/nocturne";
 
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
@@ -45,6 +54,40 @@ export function GoLiveComposer() {
           <p className="mt-1.5 flex justify-between font-mono text-[10px] text-faint">
             <span>{ready ? "Good enough to broadcast" : "At least 12 characters"}</span>
             <span className="tabular-nums">{goal.length}/120</span>
+          </p>
+        </div>
+
+        <div>
+          <label htmlFor="feed" className="eyebrow block">
+            Point the picture at a stream
+          </label>
+          <p className="mt-2 text-sm text-muted">
+            Paste the YouTube URL you&apos;re broadcasting to — a live stream, a premiere,
+            or a recorded run. That video becomes the picture on your run page, with the
+            Prompt-Cam and the Wire layered around it.
+          </p>
+          <input
+            id="feed"
+            value={feed}
+            onChange={(e) => {
+              setFeed(e.target.value);
+              setPosterFailed(false);
+            }}
+            placeholder="https://www.youtube.com/live/…"
+            className={`mt-3 w-full border bg-panel px-3 py-2.5 font-mono text-[13px] text-bone placeholder:text-faint focus:outline-none ${
+              feedTouched && !source ? "border-del" : "border-edge focus:border-amber"
+            }`}
+          />
+          <p
+            className={`mt-1.5 font-mono text-[10px] ${
+              feedTouched && !source ? "text-del" : "text-faint"
+            }`}
+          >
+            {feedTouched && !source
+              ? "Not a YouTube link. Try youtube.com/watch, youtu.be or /live/."
+              : source
+                ? `Feed locked: ${source.id}`
+                : "Leave it empty and the run shows the editor feed instead."}
           </p>
         </div>
 
@@ -144,6 +187,20 @@ export function GoLiveComposer() {
       <div className="lg:sticky lg:top-24 lg:self-start">
         <p className="eyebrow mb-3">What the network will see</p>
         <Poster tone={1} className="aspect-[16/10]">
+          {/* Once a feed is set, the poster shows its actual frame. */}
+          {source && !posterFailed && (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                key={source.id}
+                src={thumbnailUrl(source)}
+                alt=""
+                onError={() => setPosterFailed(true)}
+                className="absolute inset-0 h-full w-full object-cover opacity-45"
+              />
+              <div aria-hidden className="absolute inset-0 bg-ink/35" />
+            </>
+          )}
           <div className="relative flex h-full flex-col justify-between p-3">
             <div className="flex items-start justify-between">
               <LiveBadge />
@@ -179,17 +236,32 @@ export function GoLiveComposer() {
               .filter(Boolean)
               .join(", ") || "none"}
           </p>
+          <p>
+            <span className="text-muted">picture</span>{" "}
+            {source ? `youtube · ${source.id}` : "editor feed"}
+          </p>
         </div>
 
-        <button
-          type="button"
-          disabled={!ready}
-          className="mt-5 w-full px-4 py-3 font-mono text-xs font-semibold tracking-[0.14em] uppercase transition-colors disabled:cursor-not-allowed disabled:border disabled:border-edge disabled:bg-transparent disabled:text-faint enabled:bg-tally enabled:text-ink enabled:hover:bg-bone"
-        >
-          {ready ? "Hit the tally" : "Declare a goal first"}
-        </button>
+        {ready ? (
+          <Link
+            href={tallyHref}
+            className="mt-5 block w-full bg-tally px-4 py-3 text-center font-mono text-xs font-semibold tracking-[0.14em] text-ink uppercase transition-colors hover:bg-bone"
+          >
+            Hit the tally
+          </Link>
+        ) : (
+          <button
+            type="button"
+            disabled
+            className="mt-5 w-full cursor-not-allowed border border-edge px-4 py-3 font-mono text-xs font-semibold tracking-[0.14em] text-faint uppercase"
+          >
+            Declare a goal first
+          </button>
+        )}
         <p className="mt-2 font-mono text-[10px] text-faint">
-          Prototype build — nothing broadcasts from this page.
+          {source
+            ? "Opens your run page with this feed playing."
+            : "Prototype build — the run page opens with the simulated editor feed."}
         </p>
       </div>
     </div>

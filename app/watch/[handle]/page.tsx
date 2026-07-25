@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { PromptCamTimeline } from "@/components/stream/prompt-cam-timeline";
 import { RunCard } from "@/components/stream/run-card";
 import { SidePanel } from "@/components/stream/side-panel";
-import { StreamCanvas } from "@/components/stream/stream-canvas";
+import { StreamPlayer } from "@/components/stream/stream-player";
 import { VibeMeter } from "@/components/stream/vibe-meter";
 import { WireFeed } from "@/components/stream/wire-feed";
 import { Avatar } from "@/components/ui/avatar";
@@ -59,7 +59,7 @@ export default async function WatchPage({ params }: { params: Promise<{ handle: 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         {/* ------------------------------------------------------------ stage */}
         <div className="min-w-0">
-          <StreamCanvas
+          <StreamPlayer
             handle={run.handle}
             code={run.code}
             elapsed={run.elapsed}
