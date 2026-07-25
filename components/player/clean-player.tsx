@@ -1,6 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  BackIcon,
+  ExitFullscreenIcon,
+  ForwardIcon,
+  FullscreenIcon,
+  LiveEdgeIcon,
+  PauseIcon,
+  PlayIcon,
+  VolumeIcon,
+} from "@/components/player/icons";
 import { LiveBadge } from "@/components/ui/bits";
 import {
   atLiveEdge,
@@ -13,6 +23,7 @@ import {
   fractionOf,
   isFiniteNumber,
   liveOffsetLabel,
+  maskGlyph,
   narrowDvr,
   type Phase,
   pictureCover,
@@ -34,9 +45,16 @@ import { posterFallbackUrl, posterUrl } from "@/lib/youtube";
  * suggestions — is painted inside a cross-origin iframe and cannot be removed
  * from the outside. It can only be kept from being summoned, or covered.
  * Hover and clicks are eaten by a transparent shield, so during playback it
- * never appears at all. What the shield cannot reach is the chrome a *state
- * change* raises: a resume or a seek puts it up for about four seconds, and a
- * pause puts it up until playback resumes.
+ * never appears at all. That shield is no longer inert: clicking the picture
+ * plays and pauses it, and on a pointer that has a double-click, a double-click
+ * goes fullscreen. This is the balance the ticket asked for, stated as one
+ * rule — **our UI owns every interaction with the picture; YouTube's owns
+ * none** — and it is also the cheapest fix, because a click that never reaches
+ * the iframe is chrome that is never summoned in the first place.
+ *
+ * What the shield cannot reach is the chrome a *state change* raises: a resume
+ * or a seek puts it up for about four seconds, and a pause puts it up until
+ * playback resumes.
  *
  * This used to be answered by blacking the whole frame out, which meant a
  * paused stream was a black rectangle and a loading one was four seconds of
@@ -203,6 +221,9 @@ export function CleanPlayer({
   // While a finger is down the bar follows the finger, not the poll.
   const [scrub, setScrub] = useState<number | null>(null);
   const seekAimRef = useRef<number | null>(null);
+  // Where a *mouse* is hovering the bar, so it can say what is under the
+  // cursor before you commit to it. Null on touch, which has no hover.
+  const [hover, setHover] = useState<number | null>(null);
 
   // The settling window. A resume or a seek raises YouTube's chrome for about
   // four seconds and it cannot be dismissed from out here, so the mask is held
@@ -487,6 +508,58 @@ export function CleanPlayer({
     shell.focus?.();
   }, []);
 
+  /**
+   * Clicking the picture.
+   *
+   * A double-click fires `click`, `click`, `dblclick` — not `click`, `dblclick`
+   * — and both of those clicks are dispatched before React re-renders, so both
+   * read the same stale `playing` and would issue the *same* command twice
+   * (`pauseVideo()` twice, not pause-then-play). So the toggle is held for a
+   * beat and cancelled if a second click lands, rather than fired and undone.
+   *
+   * That beat is only spent where it buys something. Touch has no reliable
+   * `dblclick` at all, so a tap toggles immediately and fullscreen is reached
+   * the way it is on every phone — by the button in the strip below, which is
+   * rendered whenever fullscreen is available.
+   */
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const coarsePointer = useRef(false);
+
+  useEffect(
+    () => () => {
+      if (clickTimer.current) clearTimeout(clickTimer.current);
+    },
+    [],
+  );
+
+  const onPictureClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!ready || failure) return;
+      if (coarsePointer.current || !fsSupported) {
+        toggle();
+        return;
+      }
+      // Ignore the second click of a burst outright; the first one is already
+      // waiting on the timer below and `dblclick` is about to cancel it.
+      if (e.detail > 1) return;
+      if (clickTimer.current) clearTimeout(clickTimer.current);
+      clickTimer.current = setTimeout(() => {
+        clickTimer.current = null;
+        toggle();
+      }, 220);
+    },
+    [ready, failure, fsSupported, toggle],
+  );
+
+  const onPictureDoubleClick = useCallback(() => {
+    if (coarsePointer.current || !fsSupported) return;
+    if (clickTimer.current) {
+      clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+    }
+    toggleFullscreen();
+  }, [fsSupported, toggleFullscreen]);
+
   // Pointer scrubbing. Pointer capture keeps the drag alive off the bar.
   const barRef = useRef<HTMLDivElement>(null);
 
@@ -503,8 +576,13 @@ export function CleanPlayer({
   }
 
   function onBarPointerMove(e: React.PointerEvent<HTMLDivElement>) {
-    if (scrub === null) return;
-    setScrub(positionAt(fractionAt(e.clientX), win));
+    if (scrub !== null) {
+      setScrub(positionAt(fractionAt(e.clientX), win));
+      return;
+    }
+    // Hover is a mouse idea. A finger dragging past the bar must not leave a
+    // readout stranded on it.
+    if (e.pointerType === "mouse" && seekable) setHover(fractionAt(e.clientX));
   }
 
   function onBarPointerUp(e: React.PointerEvent<HTMLDivElement>) {
@@ -557,8 +635,16 @@ export function CleanPlayer({
     }
   }
 
-  const buttonBase =
-    "border border-edge font-mono uppercase transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+  // One metric for every control in the strip: 32px tall, one border, one
+  // hover. Before this, six buttons had five different heights because each
+  // one was sized by whatever glyph or word happened to be inside it.
+  const ctl =
+    "inline-flex h-8 items-center justify-center border border-edge text-muted transition-colors hover:border-amber hover:text-amber disabled:cursor-not-allowed disabled:border-edge-soft disabled:text-faint disabled:hover:border-edge-soft disabled:hover:text-faint";
+  const ctlIcon = `${ctl} w-8`;
+  const ctlText = `${ctl} gap-1.5 px-2.5 font-mono text-[10px] tracking-[0.1em] uppercase`;
+
+  const volumeLevel = muted || volume === 0 ? "muted" : volume < 50 ? "low" : "high";
+  const hoverAt = hover === null ? null : positionAt(hover, win);
 
   return (
     // tabIndex -1 only makes the shell programmatically focusable, so our
@@ -593,49 +679,105 @@ export function CleanPlayer({
             end-screen grid — is painted inside a cross-origin iframe, so it
             cannot be removed; it can only be kept from ever being summoned.
             It surfaces on hover and on click inside the frame, and this
-            swallows both. Not a control: it shows nothing and does nothing. */}
-        <div className="absolute inset-0 cursor-default" aria-hidden="true" />
+            swallows both.
+
+            It is also the play/pause target, because a picture you cannot
+            click is the thing every viewer tries first. Deliberately
+            `aria-hidden` and out of the tab order: the labelled transport
+            button below is the accessible control, and two focusable
+            same-named play buttons is worse for a screen reader than one. */}
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-hidden="true"
+          onPointerDown={(e) => {
+            coarsePointer.current = e.pointerType !== "mouse";
+          }}
+          onClick={onPictureClick}
+          onDoubleClick={onPictureDoubleClick}
+          className="absolute inset-0 h-full w-full cursor-default touch-manipulation border-0 bg-transparent outline-none"
+        />
 
         {/* Before there is a decoded frame, the video's own poster stands in.
-            Never a black box — that was the whole complaint. */}
-        {cover === "poster" && (
-          /* A plain img, not next/image: i.ytimg.com is remote and would need
-             an images.remotePatterns entry — its own decision, not this one.
-             Biome already allows it (performance/noImgElement is off). */
-          <img
-            src={poster}
-            alt=""
-            aria-hidden="true"
-            fetchPriority="high"
-            decoding="async"
-            onError={() => setPoster(posterFallbackUrl(videoId))}
-            className="pointer-events-none absolute inset-0 h-full w-full object-cover"
-          />
-        )}
+            Never a black box — that was the whole complaint. It stays mounted
+            and fades, so the hand-off to the first decoded frame is a
+            dissolve rather than a flash of whatever is underneath. */}
+        {/* A plain img, not next/image: i.ytimg.com is remote and would need
+            an images.remotePatterns entry — its own decision, not this one.
+            Biome already allows it (performance/noImgElement is off). */}
+        <img
+          src={poster}
+          alt=""
+          aria-hidden="true"
+          fetchPriority="high"
+          decoding="async"
+          onError={() => setPoster(posterFallbackUrl(videoId))}
+          className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${
+            cover === "poster" ? "opacity-100" : "opacity-0"
+          }`}
+        />
 
-        {/* The mask. Two rectangles, covering exactly where YouTube paints —
-            its title bar across the top and its state disc in the middle —
-            and nothing else, so the frozen frame stays a frame. The disc
-            carries our own glyph, which is what keeps it reading as the
-            player's own furniture rather than a patch over a hole. */}
+        {/* The mask. It covers exactly where YouTube paints — its title bar
+            and its buttons across the top, its logo along the bottom, its
+            state disc in the middle — and nothing else, so the frozen frame
+            stays a frame.
+
+            Two tones. On a stopped picture the centre is a real disc with our
+            own glyph in it, which is what keeps the cover reading as the
+            player's own furniture rather than as a patch over a hole. While
+            the picture is still running and we are only riding out the few
+            seconds of chrome a resume or a seek raised, the glyph would be a
+            lie, so only the geometry stays. The scrims do not soften between
+            the two: YouTube's title bar is up for three of those four seconds
+            at full strength, and it has to be covered for all of them. */}
         {cover === "mask" && (
-          <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+          <div
+            className="pointer-events-none absolute inset-0 transition-opacity duration-200"
+            aria-hidden="true"
+          >
+            {/* Each band is opaque across the part YouTube actually prints on
+                and only *then* starts fading. Measured against a real embed:
+                its title and avatar sit in the top 3–11% of the frame, and its
+                share button and logo in the bottom 2–11%. An earlier fade
+                looked softer and let the title read straight through it, which
+                is the whole failure this mask exists to prevent. */}
             <div
-              className="absolute inset-x-0 top-0 h-[17%]"
+              className="absolute inset-x-0 top-0 h-[22%] min-h-[84px]"
               style={{
                 background:
-                  "linear-gradient(to bottom, var(--color-ink) 0%, color-mix(in srgb, var(--color-ink) 92%, transparent) 45%, transparent 100%)",
+                  "linear-gradient(to bottom, var(--color-ink) 0%, var(--color-ink) 62%, color-mix(in srgb, var(--color-ink) 72%, transparent) 82%, transparent 100%)",
               }}
             />
             <div
-              className="absolute top-1/2 left-1/2 grid aspect-square w-[22%] max-w-[140px] min-w-[64px] -translate-x-1/2 -translate-y-1/2 place-items-center"
+              className="absolute inset-x-0 bottom-0 h-[19%] min-h-[74px]"
               style={{
                 background:
-                  "radial-gradient(circle, var(--color-ink) 0 58%, color-mix(in srgb, var(--color-ink) 86%, transparent) 74%, transparent 100%)",
+                  "linear-gradient(to top, var(--color-ink) 0%, var(--color-ink) 62%, color-mix(in srgb, var(--color-ink) 66%, transparent) 82%, transparent 100%)",
+              }}
+            />
+            {/* `closest-side`, not the default `farthest-corner`: with the
+                latter the gradient only reaches transparent out at the
+                corners, so the box's own straight edges stay tinted and the
+                feather renders as a visible dark square. */}
+            {/* Measured, not guessed: dropping this to 40% for the settling
+                window — on the theory that a resume only flashes a ripple —
+                let YouTube's own pause glyph read straight through it. It
+                stays opaque in every state the mask covers. */}
+            <div
+              className="absolute top-1/2 left-1/2 grid aspect-square w-[30%] max-w-[190px] min-w-[86px] -translate-x-1/2 -translate-y-1/2 place-items-center"
+              style={{
+                background:
+                  "radial-gradient(circle closest-side, var(--color-ink) 0 56%, color-mix(in srgb, var(--color-ink) 84%, transparent) 78%, transparent 100%)",
               }}
             >
-              <span className="font-mono text-[15px] text-bone">
-                {phase === "paused" ? "❚❚" : "▶"}
+              <span className="grid h-[58%] w-[58%] place-items-center rounded-full border border-edge bg-ink text-bone">
+                {maskGlyph(phase) === "pause" ? (
+                  <PauseIcon className="h-[34%] w-[34%]" />
+                ) : (
+                  // Nudged right by the triangle's own optical centre, which
+                  // is not its bounding box's.
+                  <PlayIcon className="ml-[6%] h-[34%] w-[34%]" />
+                )}
               </span>
             </div>
           </div>
@@ -657,23 +799,26 @@ export function CleanPlayer({
         {label && cover !== "slate" && (
           <span
             aria-live="polite"
-            className="pointer-events-none absolute bottom-2.5 left-2.5 border border-edge bg-ink/85 px-2 py-1 font-mono text-[9px] tracking-[0.16em] text-bone uppercase backdrop-blur-[2px]"
+            className="pointer-events-none absolute bottom-2.5 left-2.5 inline-flex items-center gap-1.5 border border-edge bg-ink/85 px-2 py-1 font-mono text-[9px] tracking-[0.16em] text-bone uppercase backdrop-blur-[2px]"
           >
+            {live && !behindEdge && <span className="h-1 w-1 rounded-full bg-tally" />}
             {label}
           </span>
         )}
       </div>
 
       {/* Everything else, underneath. */}
-      <div className="border border-t-0 border-edge-soft bg-ink-2">
+      <div className="player-controls border border-t-0 border-edge-soft bg-ink-2">
         {/* The line. Drag it back through the stream, or forward again. */}
-        <div className="flex items-center gap-3 px-3 pt-2.5">
+        <div className="flex items-center gap-3 px-3 pt-3">
           <span className="w-14 shrink-0 font-mono text-[10px] text-faint tabular-nums">
             {clock(live ? Math.max(0, shown - win.start) : shown)}
           </span>
 
           {/* A div rather than a range input: the bar has to paint the live
-              edge and the window behind it, which an input can't carry. */}
+              edge, the window behind it and where the cursor is pointing,
+              none of which an input can carry. `touch-none` is load-bearing —
+              without it a drag on a phone scrolls the page instead. */}
           <div
             ref={barRef}
             role="slider"
@@ -688,20 +833,41 @@ export function CleanPlayer({
             onPointerMove={onBarPointerMove}
             onPointerUp={onBarPointerUp}
             onPointerCancel={onBarPointerUp}
+            onPointerLeave={() => setHover(null)}
             onKeyDown={onBarKeyDown}
-            className={`group relative -my-2 flex h-8 flex-1 items-center ${
+            className={`group relative -my-2 flex h-8 flex-1 touch-none items-center ${
               seekable ? "cursor-pointer" : "cursor-default opacity-50"
             }`}
           >
-            <div className="relative h-[3px] w-full bg-edge">
+            {/* What is under the cursor, before you commit to it. */}
+            {hoverAt !== null && scrub === null && (
+              <span
+                className="pointer-events-none absolute bottom-full z-10 mb-1.5 -translate-x-1/2 border border-edge bg-ink px-1.5 py-0.5 font-mono text-[10px] text-bone tabular-nums"
+                style={{ left: `${(hover ?? 0) * 100}%` }}
+              >
+                {live ? liveOffsetLabel(hoverAt, edge) : clock(hoverAt)}
+              </span>
+            )}
+
+            <div className="relative h-[3px] w-full bg-edge transition-all duration-150 group-hover:h-[5px]">
+              {/* A ghost out to the cursor, so the bar answers before the click. */}
+              {hover !== null && scrub === null && (
+                <div
+                  className="absolute inset-y-0 left-0 bg-bone/20"
+                  style={{ width: `${hover * 100}%` }}
+                />
+              )}
               <div
                 className={`absolute inset-y-0 left-0 ${lineTone}`}
                 style={{ width: `${fraction * 100}%` }}
               />
+              {/* The knob keeps out of the way until it is wanted. */}
               <span
-                className={`absolute top-1/2 h-3 w-[3px] -translate-x-1/2 -translate-y-1/2 transition-transform group-hover:scale-y-125 ${
-                  lineTone
-                } ${scrub !== null ? "scale-y-150" : ""}`}
+                className={`absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-ink-2 transition-opacity duration-150 ${lineTone} ${
+                  scrub !== null
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+                }`}
                 style={{ left: `${fraction * 100}%` }}
               />
             </div>
@@ -716,90 +882,117 @@ export function CleanPlayer({
           </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 pt-2 pb-2.5">
-          <button
-            type="button"
-            onClick={toggle}
-            disabled={!ready || Boolean(failure)}
-            aria-label={playing ? "Pause" : "Play"}
-            aria-pressed={playing}
-            className={`${buttonBase} w-9 py-1.5 text-[11px] text-bone hover:border-amber hover:text-amber`}
-          >
-            {playing ? "❚❚" : "▶"}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => nudge(-10)}
-            disabled={!seekable}
-            aria-label="Back 10 seconds"
-            className={`${buttonBase} px-2.5 py-1.5 text-[10px] tracking-[0.1em] text-muted hover:text-bone`}
-          >
-            ‹‹ 10s
-          </button>
-
-          <button
-            type="button"
-            onClick={() => nudge(10)}
-            disabled={!seekable || (live && !behindEdge)}
-            aria-label="Forward 10 seconds"
-            className={`${buttonBase} px-2.5 py-1.5 text-[10px] tracking-[0.1em] text-muted hover:text-bone`}
-          >
-            10s ››
-          </button>
-
-          <button
-            type="button"
-            onClick={toggleMute}
-            disabled={!ready || Boolean(failure)}
-            className={`border px-2.5 py-1.5 font-mono text-[10px] tracking-[0.1em] uppercase transition-colors disabled:opacity-40 ${
-              muted
-                ? "border-amber text-amber hover:bg-amber hover:text-ink"
-                : "border-edge text-muted hover:text-bone"
-            }`}
-          >
-            {muted ? "Unmute" : "Mute"}
-          </button>
-
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={volume}
-            disabled={!ready || Boolean(failure)}
-            aria-label="Volume"
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              setVolume(v);
-              playerRef.current?.setVolume(v);
-              if (v > 0 && muted) {
-                playerRef.current?.unMute();
-                setMuted(false);
-              }
-            }}
-            className="h-1 w-24 accent-[var(--color-amber)]"
-          />
-
-          {live && behindEdge && (
+        {/* Grouped, not strung out: transport, then sound, then — pushed to
+            the far end — the two controls that change what you are looking
+            at rather than what is playing. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 pt-2.5 pb-3">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={goLive}
-              className="border border-tally px-2.5 py-1.5 font-mono text-[10px] tracking-[0.12em] text-tally uppercase transition-colors hover:bg-tally hover:text-ink"
+              onClick={toggle}
+              disabled={!ready || Boolean(failure)}
+              aria-label={playing ? "Pause" : "Play"}
+              title={playing ? "Pause (Space)" : "Play (Space)"}
+              className={`${ctlIcon} text-bone`}
             >
-              Jump to live
+              {playing ? <PauseIcon /> : <PlayIcon />}
             </button>
-          )}
 
-          {fsSupported && (
             <button
               type="button"
-              onClick={toggleFullscreen}
-              aria-pressed={fullscreen}
-              className={`${buttonBase} ml-auto px-2.5 py-1.5 text-[10px] tracking-[0.1em] text-muted hover:text-bone`}
+              onClick={() => nudge(-10)}
+              disabled={!seekable}
+              aria-label="Back 10 seconds"
+              title="Back 10 seconds (←)"
+              className={ctlText}
             >
-              {fullscreen ? "Exit full screen" : "Fullscreen"}
+              <BackIcon size={13} />
+              10s
             </button>
-          )}
+
+            <button
+              type="button"
+              onClick={() => nudge(10)}
+              disabled={!seekable || (live && !behindEdge)}
+              aria-label="Forward 10 seconds"
+              title="Forward 10 seconds (→)"
+              className={ctlText}
+            >
+              <ForwardIcon size={13} />
+              10s
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 border-l border-edge-soft pl-3">
+            <button
+              type="button"
+              onClick={toggleMute}
+              disabled={!ready || Boolean(failure)}
+              aria-label={muted ? "Unmute" : "Mute"}
+              aria-pressed={muted}
+              title={muted ? "Unmute (M)" : "Mute (M)"}
+              className={`${ctlIcon} ${
+                // Muted is the state worth shouting about: autoplay forces it,
+                // and a viewer who doesn't notice thinks the stream is silent.
+                muted ? "border-amber text-amber hover:bg-amber hover:text-ink" : ""
+              }`}
+            >
+              <VolumeIcon level={volumeLevel} />
+            </button>
+
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={muted ? 0 : volume}
+              disabled={!ready || Boolean(failure)}
+              aria-label="Volume"
+              // WebKit can't paint a range's filled track; the stylesheet
+              // reads this to do it by hand.
+              style={{ "--vol": `${muted ? 0 : volume}%` } as React.CSSProperties}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setVolume(v);
+                playerRef.current?.setVolume(v);
+                if (v > 0 && muted) {
+                  playerRef.current?.unMute();
+                  setMuted(false);
+                }
+                if (v === 0 && !muted) {
+                  playerRef.current?.mute();
+                  setMuted(true);
+                }
+              }}
+              className="volume-range w-20 sm:w-24"
+            />
+          </div>
+
+          <div className="ml-auto flex items-center gap-2">
+            {live && behindEdge && (
+              <button
+                type="button"
+                onClick={goLive}
+                title="Jump to the live edge (End)"
+                className={`${ctlText} border-tally text-tally hover:border-tally hover:bg-tally hover:text-ink`}
+              >
+                <LiveEdgeIcon size={13} />
+                Live
+              </button>
+            )}
+
+            {fsSupported && (
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                aria-pressed={fullscreen}
+                aria-label={fullscreen ? "Exit full screen" : "Full screen"}
+                title={fullscreen ? "Exit full screen (F)" : "Full screen (F)"}
+                className={ctlIcon}
+              >
+                {fullscreen ? <ExitFullscreenIcon /> : <FullscreenIcon />}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </section>

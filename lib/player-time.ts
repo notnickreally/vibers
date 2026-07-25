@@ -92,6 +92,27 @@ export function pictureCover({ phase, hasPlayed, settling, failure }: CoverInput
   return settling ? "mask" : "none";
 }
 
+/**
+ * Which glyph the mask's centre disc carries.
+ *
+ * YouTube paints a control right there — a big standing button while the
+ * picture is stopped, a ripple as it acknowledges a resume or a seek — so the
+ * disc has to be opaque over all of it either way. What it must not be is
+ * *blank*: an unmarked dark circle in the middle of the frame reads as a smudge
+ * over a hole, and a half-transparent one lets YouTube's own glyph show
+ * straight through, which is the conflict this whole ticket is about. So the
+ * disc always covers, and it always says something.
+ *
+ * Paused is the only state that says "pause". Everything else the mask covers —
+ * a resume, a seek, a cued or cold picture — is a picture that is about to be,
+ * or already is, running.
+ */
+export type MaskGlyph = "play" | "pause";
+
+export function maskGlyph(phase: Phase): MaskGlyph {
+  return phase === "paused" ? "pause" : "play";
+}
+
 /** The words that go with a cover. Short enough to sit in a corner badge. */
 export function coverLabel({
   phase,

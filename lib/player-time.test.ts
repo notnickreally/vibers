@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { coverLabel, type Cover, type Phase, pictureCover } from "./player-time";
+import { coverLabel, type Cover, maskGlyph, type Phase, pictureCover } from "./player-time";
 import { posterFallbackUrl, posterUrl } from "./youtube";
 
 /**
@@ -96,6 +96,32 @@ describe("pictureCover", () => {
     // trip ENDED, so a transient one is a known event here.
     expect(cover("ended", { hasPlayed: true })).toBe("slate");
     expect(cover("playing", { hasPlayed: true })).toBe("none");
+  });
+});
+
+describe("maskGlyph", () => {
+  it("says pause on the one state that is paused", () => {
+    expect(maskGlyph("paused")).toBe("pause");
+  });
+
+  it("says play everywhere else the mask goes up", () => {
+    // A resume and a seek both land in playback, and a cued or cold picture
+    // is one press away from it. None of them are a pause.
+    for (const phase of ["cold", "cued", "buffering", "playing"] as Phase[]) {
+      expect(maskGlyph(phase)).toBe("play");
+    }
+  });
+
+  it("always has something to say wherever a mask is drawn", () => {
+    // The disc is never blank: an unmarked dark circle reads as a smudge over
+    // a hole, and that was the complaint the mask exists to answer.
+    const glyphs = ["play", "pause"];
+    for (const phase of PHASES) {
+      for (const settling of [false, true]) {
+        if (cover(phase, { hasPlayed: true, settling }) !== "mask") continue;
+        expect(glyphs).toContain(maskGlyph(phase));
+      }
+    }
   });
 });
 
