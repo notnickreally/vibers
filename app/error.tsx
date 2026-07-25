@@ -30,7 +30,7 @@ export default function GlobalRouteError({
         </h1>
         <p className="mt-2 max-w-lg text-sm leading-relaxed text-muted">
           Something threw while building the view. Reloading the page usually clears it — if
-          it doesn&apos;t, the live runs themselves are unaffected.
+          it doesn&apos;t, the streams themselves are unaffected.
         </p>
         <div className="mt-6 flex flex-wrap gap-2">
           <button
@@ -41,10 +41,10 @@ export default function GlobalRouteError({
             Try again
           </button>
           <Link
-            href="/browse"
+            href="/"
             className="border border-edge px-4 py-2 font-mono text-[11px] tracking-[0.12em] text-bone uppercase transition-colors hover:border-teal hover:text-teal"
           >
-            Browse live runs
+            Back to the wall
           </Link>
         </div>
       </div>
