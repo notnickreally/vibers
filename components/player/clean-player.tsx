@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { LiveBadge } from "@/components/ui/bits";
 import {
   atLiveEdge,
+  clamp,
   clock,
   DEFAULT_DVR_SECONDS,
   fractionFromPointer,
@@ -23,11 +24,17 @@ import {
  * scrubber, play/pause, volume, fullscreen — is our own markup, and all of it
  * lives in siblings *outside* the frame: the picture itself is never covered.
  *
- * What is deliberately *not* done: the player's branding is not covered or
- * removed, and nothing is drawn over the frame. YouTube's title and logo still
- * appear if you hover the picture — that's their attribution, and hiding it is
- * both against their terms and the thing that keeps carrying other people's
- * streams defensible.
+ * YouTube's own chrome — title bar, avatar, share, watch-later, end-screen
+ * suggestions — is painted inside a cross-origin iframe and cannot be removed
+ * from the outside. It is instead never summoned: a transparent shield eats
+ * the hover and clicks that call it up, and the frame goes to slate while
+ * playback is stopped, because a stopped player draws that chrome unprompted.
+ *
+ * Note what this costs. Hiding the embed's branding is against YouTube's embed
+ * terms, and the attribution it carries is part of what makes carrying someone
+ * else's stream defensible — the channel link and "Watch on YouTube" below the
+ * player are now the only place that credit appears. Product's call, taken
+ * knowingly; if it is ever revisited, deleting the shield restores the embed.
  */
 
 interface Player {
@@ -267,10 +274,15 @@ export function CleanPlayer({
   }, []);
 
   const win = seekWindow({ edge, isLive: live, dvrSeconds });
-  const shown = scrub ?? position;
+  // Clamped: the polled clock can read a second or two past the duration
+  // YouTube reports, and a readout beyond the end reads as a bug.
+  const shown = clamp(scrub ?? position, win.start, win.end);
   const fraction = fractionOf(shown, win);
   const behindEdge = live && !atLiveEdge(shown, edge);
   const seekable = ready && !failure && win.end - win.start > 1;
+  // Tally red means one thing on this site: live, right now. A recording's
+  // progress, and a live stream you have rewound out of, are amber.
+  const lineTone = live && !behindEdge ? "bg-tally" : "bg-amber";
 
   const seek = useCallback(
     (seconds: number) => {
@@ -446,9 +458,27 @@ export function CleanPlayer({
           className="absolute inset-0 [&>iframe]:h-full [&>iframe]:w-full"
         />
 
+        {/* YouTube's own chrome — the title bar, avatar, share, watch-later,
+            end-screen grid — is painted inside a cross-origin iframe, so it
+            cannot be removed; it can only be kept from ever being summoned.
+            It surfaces on hover and on click inside the frame, and this
+            swallows both. Not a control: it shows nothing and does nothing. */}
+        <div className="absolute inset-0 cursor-default" aria-hidden="true" />
+
+        {/* The one thing hover-blocking can't reach: while the video is
+            stopped YouTube paints its play button, title and suggestions
+            unprompted. So the frame goes to slate until playback resumes. */}
+        {ready && !failure && !playing && (
+          <div className="absolute inset-0 grid place-items-center bg-ink">
+            <span className="font-mono text-[11px] tracking-[0.18em] text-faint uppercase">
+              {position > 0 ? "Paused" : "Press play"}
+            </span>
+          </div>
+        )}
+
         {/* Status text only — no control ever sits over the frame. */}
         {(!ready || failure) && (
-          <div className="pointer-events-none absolute inset-0 grid place-items-center px-6">
+          <div className="pointer-events-none absolute inset-0 grid place-items-center bg-ink px-6">
             <span className="text-center font-mono text-[11px] leading-relaxed tracking-[0.14em] text-faint uppercase">
               {failure || "Connecting…"}
             </span>
@@ -487,12 +517,12 @@ export function CleanPlayer({
           >
             <div className="relative h-[3px] w-full bg-edge">
               <div
-                className={`absolute inset-y-0 left-0 ${behindEdge ? "bg-amber" : "bg-tally"}`}
+                className={`absolute inset-y-0 left-0 ${lineTone}`}
                 style={{ width: `${fraction * 100}%` }}
               />
               <span
                 className={`absolute top-1/2 h-3 w-[3px] -translate-x-1/2 -translate-y-1/2 transition-transform group-hover:scale-y-125 ${
-                  behindEdge ? "bg-amber" : "bg-tally"
+                  lineTone
                 } ${scrub !== null ? "scale-y-150" : ""}`}
                 style={{ left: `${fraction * 100}%` }}
               />
