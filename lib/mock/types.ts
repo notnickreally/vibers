@@ -161,6 +161,27 @@ export interface FeedPost {
   replies: number;
 }
 
+/**
+ * A **relay**: a YouTube stream someone pointed the network at, rather than a
+ * run someone is broadcasting here. The URL is the only required part — every
+ * other field is optional, and whatever is filled in is credited to the person
+ * who relayed it, never presented as something the creator declared.
+ *
+ * Free-form strings rather than the `Tool`/`Stack` unions: this is user input
+ * arriving from a query string, and pretending otherwise would be a lie to the
+ * type system.
+ */
+export interface Relay {
+  videoId: string;
+  start?: number;
+  title?: string;
+  note?: string;
+  tool?: string;
+  stacks?: string[];
+  /** The vibers.tv account that put it on the network. */
+  relayedBy?: string;
+}
+
 export interface Project {
   name: string;
   blurb: string;

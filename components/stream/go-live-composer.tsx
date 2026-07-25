@@ -27,7 +27,10 @@ export function GoLiveComposer() {
 
   const source = parseYouTube(feed);
   const feedTouched = feed.trim().length > 0;
-  const ready = goal.trim().length >= 12;
+  // A goal is what makes a broadcast a *run*; without one you still get a page,
+  // it just doesn't claim to be chasing anything.
+  const hasGoal = goal.trim().length >= 12;
+  const ready = hasGoal || !!source;
   // Going live routes to your own run page, carrying the feed on the URL.
   const tallyHref = source ? `/watch/nocturne?v=${source.id}` : "/watch/nocturne";
 
@@ -36,11 +39,12 @@ export function GoLiveComposer() {
       <div className="space-y-6">
         <div>
           <label htmlFor="goal" className="eyebrow block">
-            Declare the goal
+            Declare the goal — optional
           </label>
           <p className="mt-2 text-sm text-muted">
             One sentence, in the present tense, describing what has to be true for the run
-            to count as shipped. You cannot change it once the tally is on.
+            to count as shipped. Leave it blank and you still go live — the broadcast just
+            isn&apos;t chasing anything, and won&apos;t be scored as a run.
           </p>
           <textarea
             id="goal"
@@ -52,7 +56,13 @@ export function GoLiveComposer() {
             className="mt-3 w-full resize-none border border-edge bg-panel px-3 py-3 font-mono text-[14px] leading-relaxed text-bone placeholder:text-faint focus:border-amber focus:outline-none"
           />
           <p className="mt-1.5 flex justify-between font-mono text-[10px] text-faint">
-            <span>{ready ? "Good enough to broadcast" : "At least 12 characters"}</span>
+            <span>
+              {hasGoal
+                ? "Locked once the tally is on"
+                : goal.length > 0
+                  ? "At least 12 characters, or leave it blank"
+                  : "Optional"}
+            </span>
             <span className="tabular-nums">{goal.length}/120</span>
           </p>
         </div>
@@ -256,13 +266,20 @@ export function GoLiveComposer() {
             disabled
             className="mt-5 w-full cursor-not-allowed border border-edge px-4 py-3 font-mono text-xs font-semibold tracking-[0.14em] text-faint uppercase"
           >
-            Declare a goal first
+            Add a goal or a feed
           </button>
         )}
-        <p className="mt-2 font-mono text-[10px] text-faint">
+        <p className="mt-2 font-mono text-[10px] leading-relaxed text-faint">
           {source
             ? "Opens your run page with this feed playing."
             : "Prototype build — the run page opens with the simulated editor feed."}
+        </p>
+        <p className="mt-3 border-t border-edge-soft pt-3 font-mono text-[10px] leading-relaxed text-faint">
+          Relaying someone else&apos;s stream instead?{" "}
+          <Link href="/relay" className="text-teal underline-offset-4 hover:underline">
+            Use a relay
+          </Link>{" "}
+          — the URL is the only thing it needs.
         </p>
       </div>
     </div>

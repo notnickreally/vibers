@@ -50,6 +50,8 @@ not by game. The boards rank ships, assists and one-shots — never followers.
 | `/clips` | Clips typed by what happened — ship, rescue, rabbit hole, one-shot |
 | `/leaderboard` | Ships, assists, one-shots, streaks |
 | `/go-live` | The broadcaster side: declare a goal, pick surfaces, wire setup |
+| `/relay` | Put someone else's YouTube stream on the network — URL only |
+| `/relay/[id]` | A relayed stream: the video, its attribution, and nothing invented |
 | `/report` | Takedown path for a creator whose video is playing on a run |
 | `/states` | Reference gallery of the six UI states the run list ships with |
 
@@ -87,6 +89,31 @@ These are deliberate and load-bearing — don't relax them without a reason:
 
 The signed-in viber is a constant in `lib/session.ts` (`CURRENT_VIBER`) since
 there's no auth yet — that's the seam where real ownership checks belong.
+
+## Runs vs relays
+
+There are two kinds of page with a video on them, and the difference is the
+whole point:
+
+|  | **Run** (`/watch/[handle]`) | **Relay** (`/relay/[id]`) |
+| --- | --- | --- |
+| Whose | Someone broadcasting *here* | Someone else's YouTube stream, carried |
+| Required | A declared goal | A URL, and nothing else |
+| Shows | Prompt-Cam, Wire, co-prompt, vibe meter, viewer count | The video, its attribution, and whatever the relayer wrote |
+| Metadata | Declared by the broadcaster | Optional, and credited to whoever relayed it |
+
+A relay never renders a goal, a prompt transcript, a viewer count or a vibe
+score, because none of those would be true — the creator never said them. With
+nothing filled in, the page says so out loud rather than padding itself. When
+someone does add a title, note, tool or stack, it appears under *"Added by
+@handle"* with a line clarifying it isn't a statement from the creator. That
+distinction is the entire reason relays are a separate surface instead of a run
+with optional fields.
+
+Relays are stored in `localStorage` and shared by link — `lib/relay.ts`
+serialises the optional fields into the query string, so a relay travels without
+a backend. Creators get two routes off every relay page: take it down, or claim
+it and turn it into a real run.
 
 ## Design system
 
