@@ -12,6 +12,16 @@
  * seek proves it was too generous. */
 export const DEFAULT_DVR_SECONDS = 4 * 60 * 60;
 
+/**
+ * How long YouTube keeps its own chrome on screen after a state change.
+ *
+ * Measured, not guessed: pause, resume or an API seek all raise the title bar,
+ * the centred state disc, "More videos" and the logo, and they are still up at
+ * 3s and gone by 4s. Nothing outside the iframe can dismiss them early, so the
+ * slate that hides them has to outlast them.
+ */
+export const YT_CHROME_MS = 4000;
+
 /** Within this many seconds of the edge, a live viewer counts as "live". */
 export const LIVE_EDGE_SLACK = 12;
 

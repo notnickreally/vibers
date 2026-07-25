@@ -6,6 +6,7 @@ import { AddStream } from "@/components/wall/add-stream";
 import { EmptyState, WallSkeleton } from "@/components/states";
 import { LiveBadge } from "@/components/ui/bits";
 import { compact } from "@/lib/format";
+import { YT_CHROME_MS } from "@/lib/player-time";
 import { listStreams, removeStream, type Stream } from "@/lib/stream";
 
 /**
@@ -159,12 +160,7 @@ function Monitor({
 
       <div className="relative aspect-video bg-black">
         {mode === "monitors" ? (
-          <iframe
-            src={`https://www.youtube-nocookie.com/embed/${stream.videoId}?autoplay=1&mute=1&controls=0&rel=0&iv_load_policy=3&playsinline=1`}
-            title={stream.title}
-            allow="autoplay; encrypted-media; picture-in-picture"
-            className="absolute inset-0 h-full w-full"
-          />
+          <MonitorFrame stream={stream} />
         ) : (
           <Link href={`/watch/${stream.videoId}`} className="absolute inset-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -204,5 +200,51 @@ function Monitor({
         </p>
       </div>
     </article>
+  );
+}
+
+/**
+ * A live tile. The embed is muted and driven by nobody — but YouTube still
+ * paints its own chrome (title bar, avatar, share, watch-later, the logo)
+ * whenever the pointer enters the frame, and paints a play button and poster
+ * while it is still warming up. Neither belongs on the wall.
+ *
+ * The chrome lives inside a cross-origin iframe, so it can't be removed; it
+ * can only be kept from being summoned. A slate covers the warm-up, and the
+ * link on top eats every hover and click — doubling as the tile's own click
+ * target, which the poster mode already had.
+ */
+function MonitorFrame({ stream }: { stream: Stream }) {
+  const [warm, setWarm] = useState(false);
+
+  useEffect(() => {
+    setWarm(false);
+    // Not tied to the iframe's load event: the frame fires load long before
+    // the picture arrives, and the poster and chrome show in the gap.
+    const id = setTimeout(() => setWarm(true), YT_CHROME_MS);
+    return () => clearTimeout(id);
+  }, []);
+
+  return (
+    <>
+      <iframe
+        src={`https://www.youtube-nocookie.com/embed/${stream.videoId}?autoplay=1&mute=1&controls=0&rel=0&iv_load_policy=3&playsinline=1`}
+        title={stream.title}
+        allow="autoplay; encrypted-media; picture-in-picture"
+        className="absolute inset-0 h-full w-full"
+      />
+      {!warm && (
+        <div className="absolute inset-0 grid place-items-center bg-ink">
+          <span className="font-mono text-[10px] tracking-[0.18em] text-faint uppercase">
+            Tuning in…
+          </span>
+        </div>
+      )}
+      <Link
+        href={`/watch/${stream.videoId}`}
+        aria-label={`Watch ${stream.title}`}
+        className="absolute inset-0"
+      />
+    </>
   );
 }

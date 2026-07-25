@@ -14,6 +14,7 @@ import {
   narrowDvr,
   positionAt,
   seekWindow,
+  YT_CHROME_MS,
 } from "@/lib/player-time";
 
 /**
@@ -140,6 +141,18 @@ export function CleanPlayer({
   const [scrub, setScrub] = useState<number | null>(null);
   const seekAimRef = useRef<number | null>(null);
 
+  // The slate over the picture. Up whenever playback is stopped, and held for
+  // YT_CHROME_MS after anything we ask of the player — a resume and a seek both
+  // raise YouTube's chrome for about four seconds, and it cannot be dismissed
+  // from out here. Bumping `cover` restarts that window.
+  const [veiled, setVeiled] = useState(true);
+  const [coverUntil, setCoverUntil] = useState(0);
+  const coverChrome = useCallback(() => {
+    setVeiled(true);
+    // Event handler, not render — the no-clock-during-render rule holds.
+    setCoverUntil(Date.now() + YT_CHROME_MS);
+  }, []);
+
   const [fullscreen, setFullscreen] = useState(false);
   const [fsSupported, setFsSupported] = useState(false);
 
@@ -251,6 +264,18 @@ export function CleanPlayer({
     return () => clearInterval(id);
   }, [ready, live]);
 
+  useEffect(() => {
+    if (!playing) {
+      setVeiled(true);
+      return;
+    }
+    const id = setTimeout(
+      () => setVeiled(false),
+      Math.max(0, coverUntil - Date.now()) || YT_CHROME_MS,
+    );
+    return () => clearTimeout(id);
+  }, [playing, coverUntil]);
+
   // Fullscreen: is it even available, and are we in it right now?
   useEffect(() => {
     const doc = document as FullscreenDocument;
@@ -290,10 +315,11 @@ export function CleanPlayer({
       if (!p) return;
       const target = Math.max(0, seconds);
       seekAimRef.current = target;
+      coverChrome();
       p.seekTo(target, true);
       setPosition(target);
     },
-    [],
+    [coverChrome],
   );
 
   const nudge = useCallback(
@@ -307,9 +333,12 @@ export function CleanPlayer({
   const toggle = useCallback(() => {
     const p = playerRef.current;
     if (!p) return;
+    // Cover the picture before asking, not after: YouTube paints its chrome
+    // the moment the state changes, ahead of any event reaching us.
+    coverChrome();
     if (playing) p.pauseVideo();
     else p.playVideo();
-  }, [playing]);
+  }, [playing, coverChrome]);
 
   const toggleMute = useCallback(() => {
     const p = playerRef.current;
@@ -333,10 +362,11 @@ export function CleanPlayer({
     // Landing exactly on the edge can trip ENDED; stop just short of it.
     const target = Math.max(0, (isFiniteNumber(edge) && edge > 0 ? edge : p.getDuration()) - 2);
     seekAimRef.current = null;
+    coverChrome();
     p.seekTo(target, true);
     p.playVideo();
     setPosition(target);
-  }, [edge]);
+  }, [edge, coverChrome]);
 
   const toggleFullscreen = useCallback(() => {
     const doc = document as FullscreenDocument;
@@ -468,10 +498,10 @@ export function CleanPlayer({
         {/* The one thing hover-blocking can't reach: while the video is
             stopped YouTube paints its play button, title and suggestions
             unprompted. So the frame goes to slate until playback resumes. */}
-        {ready && !failure && !playing && (
+        {ready && !failure && veiled && (
           <div className="absolute inset-0 grid place-items-center bg-ink">
             <span className="font-mono text-[11px] tracking-[0.18em] text-faint uppercase">
-              {position > 0 ? "Paused" : "Press play"}
+              {playing ? "Resuming…" : position > 0 ? "Paused" : "Press play"}
             </span>
           </div>
         )}
