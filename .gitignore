@@ -1,5 +1,8 @@
 # Worktree-local Fredrin tooling — the CLI wrapper carries a scoped API token.
-.fredrin/
+# `.fredrin/memory/` is the exception: it is the project's committed Memory
+# bundle (concepts + ADRs), read by every Worker and by Fredrin's Memory tab.
+.fredrin/*
+!.fredrin/memory/
 
 node_modules/
 .next/
