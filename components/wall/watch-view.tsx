@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { LiveChat } from "@/components/chat/live-chat";
 import { CleanPlayer } from "@/components/player/clean-player";
 import { ErrorState } from "@/components/states";
 import { compact } from "@/lib/format";
@@ -159,6 +160,12 @@ export function WatchView({ videoId }: { videoId: string }) {
             )
           )}
         </div>
+
+        {/* The chat, under the picture — the ticket's whole point. It stays
+            mounted whatever `isLive` turns out to be, so it can't appear or
+            vanish under the reader when the live lookup lands; the heading is
+            what changes. */}
+        <LiveChat videoId={videoId} isLive={stream?.isLive} />
       </div>
 
       {/* The rest of the wall, so you can hop between streams. */}
