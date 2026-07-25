@@ -2,29 +2,29 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 /**
- * Every list surface on vibers.tv shares these five states. Errors say what
- * broke and what to do about it; empty screens are an invitation, not an
- * apology. Neither speaks in the first person.
+ * The states every surface here shares. Errors say what broke and what to do
+ * about it; empty screens are an invitation, not an apology. Neither speaks in
+ * the first person.
  */
 
-/** Loading — a grid of run-card skeletons that match the real card's geometry. */
-export function RunGridSkeleton({ count = 8 }: { count?: number }) {
+/** Loading — tiles matching the real monitor geometry, so nothing shifts. */
+export function WallSkeleton({ count = 6 }: { count?: number }) {
   return (
     <div
-      className="grid gap-x-5 gap-y-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+      className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3"
       aria-busy="true"
-      aria-label="Loading runs"
+      aria-label="Loading streams"
     >
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i}>
-          <div className="shimmer aspect-[16/10] border border-edge-soft" />
-          <div className="mt-3 flex gap-3">
-            <div className="shimmer h-[34px] w-[34px] shrink-0 rounded-[3px]" />
-            <div className="min-w-0 flex-1 space-y-2">
-              <div className="shimmer h-3 w-24" />
-              <div className="shimmer h-3 w-36" />
-              <div className="shimmer h-3 w-20" />
-            </div>
+        <div key={i} className="border border-edge-soft bg-panel">
+          <div className="flex items-center gap-2 border-b border-edge-soft bg-ink-2 px-2.5 py-1.5">
+            <div className="shimmer h-3.5 w-14" />
+          </div>
+          <div className="shimmer aspect-video" />
+          <div className="space-y-2 p-3">
+            <div className="shimmer h-3.5 w-full" />
+            <div className="shimmer h-3.5 w-2/3" />
+            <div className="shimmer h-3 w-24" />
           </div>
         </div>
       ))}
@@ -86,25 +86,6 @@ export function ErrorState({
       <h3 className="mt-4 font-display text-xl font-semibold text-bone">{title}</h3>
       <p className="mt-2 max-w-lg text-sm leading-relaxed text-muted">{body}</p>
       {action && <div className="mt-6">{action}</div>}
-    </div>
-  );
-}
-
-/**
- * Partial / slow — results are on screen but the set is incomplete. The banner
- * says which part is late, so a half-loaded page never reads as a full one.
- */
-export function PartialBanner({ detail }: { detail: string }) {
-  return (
-    <div className="mb-6 flex flex-wrap items-center gap-3 border border-amber/40 bg-amber/8 px-4 py-3">
-      <span
-        className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber"
-        aria-hidden
-      />
-      <p className="min-w-0 flex-1 text-sm text-bone/90">{detail}</p>
-      <span className="font-mono text-[10px] tracking-[0.14em] text-amber uppercase">
-        Partial results
-      </span>
     </div>
   );
 }

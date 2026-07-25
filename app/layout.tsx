@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque, Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import { SiteHeader } from "@/components/chrome/site-header";
-import { ShipTicker } from "@/components/chrome/ship-ticker";
 import { SiteFooter } from "@/components/chrome/site-footer";
 import "./globals.css";
 
@@ -25,11 +24,11 @@ const jetbrains = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "vibers.tv — watch people build things live",
+    default: "vibers.tv — a wall of live coding streams",
     template: "%s · vibers.tv",
   },
   description:
-    "The social network for vibecoders. Live runs, prompt-cams, diff wires and ship moments — from empty repo to deploy, in public.",
+    "Put YouTube live coding streams on a wall, watch them side by side, and open the one you want.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -44,7 +43,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </a>
         <div className="relative z-10 flex min-h-screen flex-col">
           <SiteHeader />
-          <ShipTicker />
           <main id="main" className="flex-1">
             {children}
           </main>

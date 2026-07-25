@@ -2,24 +2,24 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { RIGHTS_CONTACT } from "@/lib/session";
+import { RIGHTS_CONTACT } from "@/lib/stream";
 
 /**
- * The takedown path. A creator whose video is playing on a run they never
- * agreed to needs a way to say so and be believed — so this form is short,
- * asks only for what a review actually needs, and does not require an account.
+ * The takedown path. A creator whose stream is on someone's wall needs a way to
+ * say so and be believed — so this is short, asks only what a review needs, and
+ * requires no account.
  */
 
 const REASONS = [
   {
     key: "unauthorized",
-    label: "I own this video and did not authorise this run",
-    detail: "The feed is removed while the report is reviewed.",
+    label: "I own this stream and don't want it here",
+    detail: "It comes off the wall while the report is reviewed.",
   },
   {
-    key: "misattributed",
-    label: "The run misrepresents me or my work",
-    detail: "Covers wrong attribution, implied endorsement, or a fabricated goal.",
+    key: "misrepresented",
+    label: "The page misrepresents me or my work",
+    detail: "Wrong attribution, implied endorsement, or misleading framing.",
   },
   {
     key: "infringing",
@@ -29,15 +29,7 @@ const REASONS = [
   { key: "other", label: "Something else", detail: "Tell us what's wrong below." },
 ] as const;
 
-export function ReportForm({
-  run,
-  handle,
-  videoId,
-}: {
-  run?: string;
-  handle?: string;
-  videoId?: string;
-}) {
+export function ReportForm({ videoId }: { videoId?: string }) {
   const [reason, setReason] = useState<string>(REASONS[0].key);
   const [email, setEmail] = useState("");
   const [details, setDetails] = useState("");
@@ -50,26 +42,23 @@ export function ReportForm({
           Report filed
         </span>
         <h2 className="mt-4 font-display text-2xl font-semibold text-bone">
-          The feed is off while this is reviewed
+          It comes off the wall while this is reviewed
         </h2>
         <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-muted">
-          Reports naming a specific run are actioned before they are judged — the video
-          stops playing on vibers.tv immediately, and a human reads the report within one
-          business day. You&apos;ll get a decision at {email || "the address you gave"}.
+          Reports naming a specific video are actioned before they are judged. A person
+          reads the report within one business day, and you get a decision at{" "}
+          {email || "the address you gave"}.
         </p>
         <p className="mt-4 max-w-xl font-mono text-[11px] leading-relaxed text-faint">
-          Prototype build — this form has no backend, so nothing was actually sent. In the
-          real thing this is the point where the run&apos;s feed is cut. For anything urgent,
-          write to {RIGHTS_CONTACT}.
+          Prototype build — this form has no backend, so nothing was actually sent. For
+          anything urgent, write to {RIGHTS_CONTACT}.
         </p>
-        <div className="mt-6 flex flex-wrap gap-2">
-          <Link
-            href="/"
-            className="bg-amber px-4 py-2 font-mono text-[11px] font-semibold tracking-[0.12em] text-ink uppercase transition-colors hover:bg-bone"
-          >
-            Back to vibers.tv
-          </Link>
-        </div>
+        <Link
+          href="/"
+          className="mt-6 inline-block bg-amber px-4 py-2 font-mono text-[11px] font-semibold tracking-[0.12em] text-ink uppercase transition-colors hover:bg-bone"
+        >
+          Back to the wall
+        </Link>
       </div>
     );
   }
@@ -82,31 +71,12 @@ export function ReportForm({
       }}
       className="max-w-2xl space-y-8"
     >
-      {(run || handle || videoId) && (
+      {videoId && (
         <div className="border border-edge-soft bg-panel p-4">
           <p className="eyebrow">Reporting</p>
-          <dl className="mt-3 space-y-1.5 font-mono text-[12px]">
-            {run && (
-              <div className="flex gap-3">
-                <dt className="w-16 shrink-0 text-faint">run</dt>
-                <dd className="text-bone">{run}</dd>
-              </div>
-            )}
-            {handle && (
-              <div className="flex gap-3">
-                <dt className="w-16 shrink-0 text-faint">viber</dt>
-                <dd className="text-bone">@{handle}</dd>
-              </div>
-            )}
-            {videoId && (
-              <div className="flex gap-3">
-                <dt className="w-16 shrink-0 text-faint">video</dt>
-                <dd className="min-w-0 break-all text-teal">
-                  youtube.com/watch?v={videoId}
-                </dd>
-              </div>
-            )}
-          </dl>
+          <p className="mt-2 font-mono text-[12px] break-all text-teal">
+            youtube.com/watch?v={videoId}
+          </p>
         </div>
       )}
 
