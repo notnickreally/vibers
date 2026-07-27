@@ -161,10 +161,11 @@ export function WatchView({ videoId }: { videoId: string }) {
           )}
         </div>
 
-        {/* The chat, under the picture — the ticket's whole point. It stays
-            mounted whatever `isLive` turns out to be, so it can't appear or
-            vanish under the reader when the live lookup lands; the heading is
-            what changes. */}
+        {/* The chat, under the picture. Two tabs: the stream's real YouTube
+            live chat, and your own local notes. It stays mounted whatever
+            `isLive` turns out to be, so it can't appear or vanish under the
+            reader when the live lookup lands — that only decides which tab
+            opens, and only until someone picks one. */}
         <LiveChat videoId={videoId} isLive={stream?.isLive} />
       </div>
 

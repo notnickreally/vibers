@@ -22,6 +22,24 @@ export interface ChatMessage {
   sentAt: number;
 }
 
+/** The two halves of the panel: YouTube's real chat, and your own notes. */
+export type ChatTab = "live" | "notes";
+
+/**
+ * Which tab the panel opens on.
+ *
+ * Only a stream we have *confirmed* is not live opens on the notes. Unknown
+ * opens on the chat, and that asymmetry is deliberate: `isLive` is only ever
+ * true when the Data API said so, which needs `YOUTUBE_API_KEY` — so without
+ * a key every stream reads `undefined`, and treating unknown as "not live"
+ * would hide the live chat on every video the site has. On something with no
+ * chat, YouTube's own frame says so accurately; that is a better failure than
+ * a feature nobody can find.
+ */
+export function initialTab(isLive?: boolean): ChatTab {
+  return isLive === false ? "notes" : "live";
+}
+
 export const MAX_BODY = 400;
 export const MAX_HANDLE = 24;
 /** Oldest messages fall off the top past this. A transcript, not an archive. */

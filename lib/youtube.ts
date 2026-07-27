@@ -76,6 +76,84 @@ export function watchUrl(source: YouTubeSource): string {
   return `https://www.youtube.com/watch?v=${source.id}`;
 }
 
+/**
+ * The stream's own live chat, as a framable document.
+ *
+ * Three things about this endpoint are load-bearing and none of them are
+ * obvious, so they are written down rather than rediscovered:
+ *
+ * 1. It is served from `www.youtube.com` only. `youtube-nocookie.com` — which
+ *    every other embed here uses — does not carry it.
+ * 2. `embed_domain` is the whole gate. YouTube answers with
+ *    `X-Frame-Options: SAMEORIGIN` unless it matches the parent page's
+ *    Referer hostname *exactly*: hostname only, no scheme, no port, and
+ *    `www.` is not normalised away. `window.location.hostname` is precisely
+ *    that string, which is why this takes a hostname and not a URL.
+ * 3. The Referer header is the only signal YouTube reads. A page that sends
+ *    none — `Referrer-Policy: no-referrer`, or a `referrerpolicy` on the
+ *    frame — is refused even with a correct `embed_domain`. See the frame in
+ *    `components/chat/live-chat.tsx`.
+ *
+ * Returns null rather than a URL that would load a refusal, so the caller has
+ * something to branch on. Verified against www.youtube.com, 2026-07-27.
+ */
+export function liveChatUrl(videoId: string, embedDomain: string): string | null {
+  if (!ID.test(videoId)) return null;
+  const host = normalizeEmbedDomain(embedDomain);
+  if (!host) return null;
+
+  const params = new URLSearchParams({
+    v: videoId,
+    embed_domain: host,
+    // Undocumented, but currently honoured — it puts `dark` on the chat
+    // document's own <html>. Light is the default, and light chat inside an
+    // aubergine panel is the one outcome worse than no chat. If YouTube ever
+    // drops it the panel still works; it just stops matching.
+    dark_theme: "1",
+  });
+  return `https://www.youtube.com/live_chat?${params}`;
+}
+
+/**
+ * The pop-out chat, for the escape hatch under the frame.
+ *
+ * `live_chat?v=…` alone does not stand up as a top-level page; `is_popout=1`
+ * is what makes it one. Deliberately not `watchUrl` — that link already
+ * exists next to the player, and someone clicking this one wants the chat.
+ */
+export function liveChatPopoutUrl(videoId: string): string | null {
+  if (!ID.test(videoId)) return null;
+  const params = new URLSearchParams({ v: videoId, is_popout: "1" });
+  return `https://www.youtube.com/live_chat?${params}`;
+}
+
+/** Hostnames YouTube will compare against: letters, digits, dots, hyphens. */
+const HOSTNAME = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*$/;
+
+/**
+ * A bare hostname, or null.
+ *
+ * A trailing `:port` is dropped — `localhost:3000` is a perfectly ordinary
+ * dev origin and YouTube matches it as `localhost`. Everything else that
+ * isn't already a hostname is rejected rather than salvaged: a scheme is not
+ * a host with a funny port, and guessing at one would hand YouTube a string
+ * that quietly fails the match.
+ */
+export function normalizeEmbedDomain(input: string): string | null {
+  const raw = input.trim().toLowerCase();
+  if (!raw || /[/@?#\s]/.test(raw)) return null;
+
+  const parts = raw.split(":");
+  if (parts.length > 2) return null;
+  // `https:example.com` splits like a port but isn't one.
+  if (parts.length === 2 && !/^\d+$/.test(parts[1])) return null;
+
+  const host = parts[0];
+  // 253 is the DNS limit; the rest keeps a stray dot from passing the regex.
+  if (!host || host.length > 253 || !HOSTNAME.test(host)) return null;
+  return host;
+}
+
 /** Poster frame, used before the player mounts and in the go-live preview. */
 export function thumbnailUrl(source: YouTubeSource): string {
   return `https://i.ytimg.com/vi/${source.id}/hqdefault.jpg`;
