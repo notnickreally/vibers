@@ -6,6 +6,56 @@
 
 const ID = /^[A-Za-z0-9_-]{11}$/;
 
+/** A bare video id, and nothing else. The gate on anything we hand upstream. */
+export function isVideoId(input: string): boolean {
+  return ID.test(input);
+}
+
+/**
+ * The `?ids=` parameter of the status route, turned into ids we're willing to
+ * send to Google.
+ *
+ * Everything here is a security control rather than a convenience: the ids are
+ * interpolated into an upstream URL, so anything that isn't recognisably a
+ * video id is dropped rather than escaped. Duplicates are collapsed so a
+ * hostile caller can't spend the day's quota on one repeated id, and the cap
+ * is `videos.list`'s own limit — asking for more than 50 is an error upstream,
+ * not a bigger answer.
+ */
+export const MAX_IDS = 50;
+
+export function parseIds(input: string | null, cap: number = MAX_IDS): string[] {
+  if (!input) return [];
+  const out: string[] = [];
+  for (const part of input.split(",")) {
+    const id = part.trim();
+    if (!ID.test(id) || out.includes(id)) continue;
+    out.push(id);
+    if (out.length >= cap) break;
+  }
+  return out;
+}
+
+/**
+ * A URL safe to put in an `href`, or null.
+ *
+ * The wall lives in localStorage, which is the user's own to edit, so a stored
+ * `channelUrl` is not automatically the `https://youtube.com/@…` that oEmbed
+ * handed us — it is whatever is in the store by the time it is read. Only
+ * http(s) survives, which is what keeps a hand-edited `javascript:` out of the
+ * link. Self-inflicted either way (nothing here is shared), but a link is a
+ * link and this is one line.
+ */
+export function safeHttpUrl(input: string | undefined): string | null {
+  if (!input) return null;
+  try {
+    const url = new URL(input);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface YouTubeSource {
   id: string;
   /** Seconds to start at, if the URL carried a timestamp. */

@@ -27,6 +27,8 @@ interface Metadata {
   description?: string;
   isLive?: boolean;
   viewers?: number;
+  /** When the broadcast ended. Only ever present on something that was live. */
+  endedAt?: string;
   publishedAt?: string;
 }
 
@@ -94,6 +96,7 @@ async function enrich(meta: Metadata, key: string): Promise<Metadata> {
       publishedAt: item.snippet?.publishedAt,
       isLive: live,
       viewers: viewers ? Number(viewers) : undefined,
+      endedAt: item.liveStreamingDetails?.actualEndTime,
     };
   } catch {
     // The key is optional; a failed enrichment must never break the lookup.

@@ -1,13 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AddStream } from "@/components/wall/add-stream";
 import { EmptyState, WallSkeleton } from "@/components/states";
 import { LiveBadge } from "@/components/ui/bits";
 import { compact } from "@/lib/format";
 import { YT_CHROME_MS } from "@/lib/player-time";
-import { listStreams, removeStream, type Stream } from "@/lib/stream";
+import { safeHttpUrl } from "@/lib/youtube";
+import {
+  cardState,
+  initialShelf,
+  listStreams,
+  partition,
+  refreshLiveness,
+  removeStream,
+  type Shelf,
+  shelf,
+  type Stream,
+} from "@/lib/stream";
 
 /**
  * The wall: every stream you've put on the network, as a bank of monitors.
@@ -16,27 +27,84 @@ import { listStreams, removeStream, type Stream } from "@/lib/stream";
  * default and shows thumbnails — cheap, quiet, scrolls forever. **Monitors**
  * swaps them for live muted players, which is the view worth having open on a
  * second screen and costs one embed per tile.
+ *
+ * And two tabs, because a wall is about what is on air. **Live** is the wall
+ * proper; **Ended** is where a broadcast goes when it finishes, so a stream
+ * that ended three weeks ago stops taking up a monitor. Liveness is re-asked
+ * on load — `isLive` is stamped when a stream is added, and believing that
+ * forever is how a finished stream stays on the Live tab for good.
  */
 
 type Mode = "posters" | "monitors";
 type Size = 2 | 3 | 4;
+
+const SHELVES: Shelf[] = ["live", "ended"];
+const SHELF_LABEL: Record<Shelf, string> = { live: "Live", ended: "Ended" };
 
 export function MonitorWall() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<Mode>("posters");
   const [size, setSize] = useState<Size>(3);
+  const [tab, setTab] = useState<Shelf>("live");
+  // Once someone has picked a tab, the refresh landing must not pull it back.
+  const touchedRef = useRef(false);
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => {
-    setStreams(listStreams());
+    const stored = listStreams();
+    setStreams(stored);
+    setTab(initialShelf(stored));
     setLoading(false);
+
+    let cancelled = false;
+    refreshLiveness().then((next) => {
+      if (cancelled) return;
+      setStreams(next);
+      if (!touchedRef.current) setTab(initialShelf(next));
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const { live, ended } = useMemo(() => partition(streams), [streams]);
+  const counts: Record<Shelf, number> = { live: live.length, ended: ended.length };
 
   const cols = {
     2: "sm:grid-cols-1 lg:grid-cols-2",
     3: "sm:grid-cols-2 lg:grid-cols-3",
     4: "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
   }[size];
+
+  const selectTab = useCallback((next: Shelf) => {
+    touchedRef.current = true;
+    setTab(next);
+  }, []);
+
+  // Arrow keys move between tabs, Home/End jump to the ends — the half of the
+  // tabs pattern that a plain row of buttons doesn't give you for free.
+  function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    const index = SHELVES.indexOf(tab);
+    let next = index;
+    if (event.key === "ArrowRight") next = (index + 1) % SHELVES.length;
+    else if (event.key === "ArrowLeft") next = (index - 1 + SHELVES.length) % SHELVES.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = SHELVES.length - 1;
+    else return;
+    event.preventDefault();
+    selectTab(SHELVES[next]);
+    tabRefs.current[next]?.focus();
+  }
+
+  const tabBase =
+    "border-b-2 px-1 pb-2 font-mono text-[11px] tracking-[0.12em] uppercase transition-colors";
+
+  function tabClass(name: Shelf) {
+    return tab === name
+      ? `${tabBase} border-amber text-amber`
+      : `${tabBase} border-transparent text-faint hover:text-bone`;
+  }
 
   return (
     <div>
@@ -56,11 +124,35 @@ export function MonitorWall() {
         </div>
       ) : (
         <>
-          <div className="mt-10 mb-5 flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-edge-soft pb-3">
-            <p className="eyebrow">
-              On the wall · <span className="text-bone">{streams.length}</span>
-            </p>
+          <div className="mt-10 flex flex-wrap items-center gap-5 border-b border-edge-soft">
+            <div role="tablist" aria-label="Wall" className="flex items-center gap-5">
+              {SHELVES.map((name, i) => (
+                <button
+                  key={name}
+                  ref={(el) => {
+                    tabRefs.current[i] = el;
+                  }}
+                  type="button"
+                  role="tab"
+                  id={`wall-tab-${name}`}
+                  aria-selected={tab === name}
+                  aria-controls={`wall-panel-${name}`}
+                  // Roving tab stop: the tablist is one stop, arrows move inside it.
+                  tabIndex={tab === name ? 0 : -1}
+                  onClick={() => selectTab(name)}
+                  onKeyDown={onTabKeyDown}
+                  className={tabClass(name)}
+                >
+                  <span className="flex items-center gap-2">
+                    {SHELF_LABEL[name]}
+                    <span className="tabular-nums opacity-70">{counts[name]}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
 
+          <div className="mt-4 mb-5 flex flex-wrap items-center gap-x-6 gap-y-3">
             <div className="flex items-center gap-2">
               <span className="font-mono text-[10px] tracking-[0.14em] text-faint uppercase">
                 View
@@ -101,23 +193,50 @@ export function MonitorWall() {
               ))}
             </div>
 
-            {mode === "monitors" && (
+            {mode === "monitors" && tab === "live" && live.length > 0 && (
               <p className="ml-auto font-mono text-[10px] text-faint">
-                {streams.length} players running, all muted
+                {live.length} players running, all muted
               </p>
             )}
           </div>
 
-          <div className={`grid gap-5 ${cols}`}>
-            {streams.map((s) => (
-              <Monitor
-                key={s.videoId}
-                stream={s}
-                mode={mode}
-                onRemove={() => setStreams(removeStream(s.videoId))}
-              />
-            ))}
-          </div>
+          {SHELVES.map((name) => {
+            const shown = name === "live" ? live : ended;
+            return (
+              <div
+                key={name}
+                role="tabpanel"
+                id={`wall-panel-${name}`}
+                aria-labelledby={`wall-tab-${name}`}
+                hidden={tab !== name}
+              >
+                {/* The inactive shelf unmounts rather than hiding. A hidden
+                    grid of embeds is either a dozen players running behind a
+                    `display:none` — the connection-pool problem the tiles
+                    already guard against — or lazy frames that never load at
+                    all, depending on the browser. Neither is worth keeping. */}
+                {tab === name &&
+                  (shown.length === 0 ? (
+                    <p className="py-10 text-center font-mono text-[11px] text-faint">
+                      {name === "live"
+                        ? "Nothing on air. Everything you've put up has ended."
+                        : "Nothing has ended yet."}
+                    </p>
+                  ) : (
+                    <div className={`grid gap-5 ${cols}`}>
+                      {shown.map((s) => (
+                        <Monitor
+                          key={s.videoId}
+                          stream={s}
+                          mode={mode}
+                          onRemove={() => setStreams(removeStream(s.videoId))}
+                        />
+                      ))}
+                    </div>
+                  ))}
+              </div>
+            );
+          })}
         </>
       )}
     </div>
@@ -133,14 +252,33 @@ function Monitor({
   mode: Mode;
   onRemove: () => void;
 }) {
+  const state = cardState(stream);
+  const off = shelf(stream) === "ended";
+  const channelUrl = safeHttpUrl(stream.channelUrl);
+  // An ended broadcast never takes a player. In monitors mode the embed would
+  // autoplay the recording from 0:00, so the Ended tab would be a grid of VODs
+  // all restarting at once — which is not a monitor wall. Unconfirmed streams
+  // keep their player: without a key that is every stream on the wall.
+  const playing = mode === "monitors" && !off;
+
   return (
-    <article className="group border border-edge-soft bg-panel transition-colors hover:border-amber/50">
+    <article
+      className={`group border bg-panel transition-colors ${
+        state === "live"
+          ? "border-tally/60 hover:border-tally"
+          : off
+            ? "border-edge-soft hover:border-edge"
+            : "border-edge-soft hover:border-amber/50"
+      }`}
+    >
       <div className="flex items-center gap-2 border-b border-edge-soft bg-ink-2 px-2.5 py-1.5">
-        {stream.isLive ? (
+        {state === "live" ? (
           <LiveBadge />
         ) : (
           <span className="border border-edge px-1.5 py-0.5 font-mono text-[9px] tracking-[0.16em] text-faint uppercase">
-            Stream
+            {/* "Ended" is only ever said about something that actually ran.
+                A video that was never a broadcast says so instead. */}
+            {state === "ended" ? "Ended" : state === "video" ? "Video" : "Stream"}
           </span>
         )}
         {stream.viewers !== undefined && (
@@ -159,7 +297,7 @@ function Monitor({
       </div>
 
       <div className="relative aspect-video bg-black">
-        {mode === "monitors" ? (
+        {playing ? (
           <MonitorFrame stream={stream} />
         ) : (
           <Link href={`/watch/${stream.videoId}`} className="absolute inset-0">
@@ -168,7 +306,9 @@ function Monitor({
               src={stream.thumbnail}
               alt=""
               loading="lazy"
-              className="h-full w-full object-cover opacity-85 transition-opacity group-hover:opacity-100"
+              className={`h-full w-full object-cover transition-opacity ${
+                off ? "opacity-60 group-hover:opacity-85" : "opacity-85 group-hover:opacity-100"
+              }`}
             />
           </Link>
         )}
@@ -176,14 +316,18 @@ function Monitor({
 
       <div className="p-3">
         <Link href={`/watch/${stream.videoId}`}>
-          <h3 className="line-clamp-2 text-sm leading-snug font-semibold text-bone transition-colors hover:text-amber">
+          <h3
+            className={`line-clamp-2 text-sm leading-snug font-semibold transition-colors ${
+              off ? "text-muted hover:text-bone" : "text-bone hover:text-amber"
+            }`}
+          >
             {stream.title}
           </h3>
         </Link>
         <p className="mt-1.5 flex flex-wrap items-center gap-x-2 font-mono text-[11px] text-faint">
-          {stream.channelUrl ? (
+          {channelUrl ? (
             <a
-              href={stream.channelUrl}
+              href={channelUrl}
               target="_blank"
               rel="noreferrer"
               className="text-teal hover:underline"

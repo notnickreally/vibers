@@ -7,6 +7,7 @@ import { CleanPlayer } from "@/components/player/clean-player";
 import { ErrorState } from "@/components/states";
 import { compact } from "@/lib/format";
 import { addStream, findStream, listStreams, lookup, type Stream } from "@/lib/stream";
+import { safeHttpUrl } from "@/lib/youtube";
 
 /**
  * One stream, full size. Metadata is looked up live rather than trusted from
@@ -41,6 +42,11 @@ export function WatchView({ videoId }: { videoId: string }) {
       cancelled = true;
     };
   }, [videoId]);
+
+  // Only ever an http(s) link. A stream can come back from localStorage, which
+  // is the reader's own to edit, so what lands in the href is not necessarily
+  // the channel URL oEmbed handed us.
+  const channelUrl = safeHttpUrl(stream?.channelUrl);
 
   if (error) {
     return (
@@ -100,9 +106,9 @@ export function WatchView({ videoId }: { videoId: string }) {
           </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            {stream?.channelUrl ? (
+            {stream && channelUrl ? (
               <a
-                href={stream.channelUrl}
+                href={channelUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="font-mono text-sm text-teal hover:underline"
