@@ -19,10 +19,14 @@ came from YouTube or you put it there.
 timestamps honoured. The title, channel and thumbnail are fetched from YouTube
 rather than typed in, so nothing can be misattributed.
 
-**The wall.** Two views. **Posters** shows thumbnails — cheap and quiet.
-**Monitors** swaps every tile for a live muted player, so the whole wall plays
-at once like a gallery of screens. The grid runs 2, 3 or 4 across. Your wall
-persists in this browser.
+**The wall.** Two tabs and two views. **Live** is the wall proper; a broadcast
+that finishes moves to **Ended**, where the tiles go quiet and grey and never
+take a player — a grid of finished VODs all restarting from 0:00 is not a
+monitor wall. Liveness is re-asked once on load, batched fifty ids to a call,
+so a stream that ends while it is up actually moves. Within a tab, **Posters**
+shows thumbnails — cheap and quiet — and **Monitors** swaps every tile for a
+live muted player, so the whole wall plays at once like a gallery of screens.
+The grid runs 2, 3 or 4 across. Your wall persists in this browser.
 
 **Watching.** `/watch/[videoId]` plays one stream with YouTube's control bar
 turned off, driven through the IFrame Player API with our own controls
@@ -121,7 +125,6 @@ Grotesque, Instrument Sans and JetBrains Mono.
 
 ## Not built yet
 
-Accounts, a shared/public wall, and auto-refreshing live status. All three need
-a backend. So does a chat of our own — the live chat you see is YouTube's,
+Accounts and a shared/public wall. Both need a backend. So does a chat of our own — the live chat you see is YouTube's,
 rendered by YouTube; the notes tab is the local stand-in for the half that
 would be ours.
