@@ -144,6 +144,34 @@ export function initialShelf(streams: Stream[]): Shelf {
 }
 
 /**
+ * How the wall draws a tile: a thumbnail, or a live muted player.
+ *
+ * It lives here rather than in the component for the same reason the shelf
+ * rules do — the wall's default view is a fact about the product, and a fact
+ * worth pinning in the suite is one the node environment has to be able to
+ * import without dragging React in behind it.
+ */
+export type Mode = "posters" | "monitors";
+
+export const MODES: Mode[] = ["posters", "monitors"];
+
+/**
+ * Monitors, not posters.
+ *
+ * The wall is the product, and the wall is a bank of running players — posters
+ * are the cheap fallback, and opening on them made every first visit look like
+ * a grid of stills you had to go find a switch to animate. So the switch starts
+ * flipped. It costs one embed per live tile on load, which is exactly what the
+ * monitors mode has always cost; the tiles already stagger themselves with
+ * `loading="lazy"` so the off-screen ones wait their turn, and the Ended shelf
+ * still takes no player in any mode.
+ *
+ * Nothing persists this — the toggle is component state — so "default" means
+ * the state every load starts in, not a preference someone can outlive.
+ */
+export const DEFAULT_MODE: Mode = "monitors";
+
+/**
  * Fold fresh liveness into the wall.
  *
  * The contract is the whole point of this being its own function, so it is

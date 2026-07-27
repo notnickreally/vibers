@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   cardState,
+  DEFAULT_MODE,
   initialShelf,
   mergeStatuses,
+  MODES,
   partition,
   shelf,
   type Status,
@@ -195,5 +197,21 @@ describe("mergeStatuses", () => {
 
   it("survives an empty wall and an empty response", () => {
     expect(mergeStatuses([], {})).toEqual([]);
+  });
+});
+
+describe("the wall's default view", () => {
+  it("opens on monitors", () => {
+    expect(DEFAULT_MODE).toBe("monitors");
+  });
+
+  it("offers a mode the wall can actually draw", () => {
+    expect(MODES).toContain(DEFAULT_MODE);
+  });
+
+  // Both modes stay reachable — making monitors the default is a change of
+  // starting point, not the removal of the cheap view.
+  it("keeps both modes on the toggle", () => {
+    expect(MODES).toEqual(["posters", "monitors"]);
   });
 });

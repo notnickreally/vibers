@@ -10,8 +10,11 @@ import { YT_CHROME_MS } from "@/lib/player-time";
 import { safeHttpUrl } from "@/lib/youtube";
 import {
   cardState,
+  DEFAULT_MODE,
   initialShelf,
   listStreams,
+  type Mode,
+  MODES,
   partition,
   refreshLiveness,
   removeStream,
@@ -23,10 +26,10 @@ import {
 /**
  * The wall: every stream you've put on the network, as a bank of monitors.
  *
- * Two modes, because they trade off against each other. **Posters** is the
- * default and shows thumbnails — cheap, quiet, scrolls forever. **Monitors**
- * swaps them for live muted players, which is the view worth having open on a
- * second screen and costs one embed per tile.
+ * Two modes, because they trade off against each other. **Monitors** is the
+ * default: live muted players, the view worth having open on a second screen,
+ * at one embed per tile. **Posters** swaps them for thumbnails — cheap, quiet,
+ * scrolls forever — for when the wall is long or the connection is not.
  *
  * And two tabs, because a wall is about what is on air. **Live** is the wall
  * proper; **Ended** is where a broadcast goes when it finishes, so a stream
@@ -35,7 +38,6 @@ import {
  * forever is how a finished stream stays on the Live tab for good.
  */
 
-type Mode = "posters" | "monitors";
 type Size = 2 | 3 | 4;
 
 const SHELVES: Shelf[] = ["live", "ended"];
@@ -44,7 +46,7 @@ const SHELF_LABEL: Record<Shelf, string> = { live: "Live", ended: "Ended" };
 export function MonitorWall() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState<Mode>("posters");
+  const [mode, setMode] = useState<Mode>(DEFAULT_MODE);
   const [size, setSize] = useState<Size>(3);
   const [tab, setTab] = useState<Shelf>("live");
   // Once someone has picked a tab, the refresh landing must not pull it back.
@@ -157,7 +159,7 @@ export function MonitorWall() {
               <span className="font-mono text-[10px] tracking-[0.14em] text-faint uppercase">
                 View
               </span>
-              {(["posters", "monitors"] as Mode[]).map((m) => (
+              {MODES.map((m) => (
                 <button
                   key={m}
                   type="button"
