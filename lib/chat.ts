@@ -202,3 +202,117 @@ export function mintHandle(seed: number): string {
   const n = Math.abs(Math.floor(seed * 10000)) % 10000;
   return `viber-${String(n).padStart(4, "0")}`;
 }
+
+/* ------------------------------------------------------------------ *
+ * Signing in to post
+ * ------------------------------------------------------------------ */
+
+/**
+ * Posting to a stream's chat needs a YouTube account, and a YouTube sign-in
+ * only completes in a **top-level window** — `accounts.google.com` answers
+ * `X-Frame-Options: DENY`, so the *Sign in* button inside the embedded chat
+ * cannot ever work. `liveChatSignInUrl` in `lib/youtube.ts` builds the URL; the
+ * few functions here are the part with the sharp edges, kept out of the
+ * component so they can be tested without a DOM.
+ *
+ * The window is opened through an injected `open` for exactly the reason the
+ * store takes its `Storage`: popup blocking and adblocker stubs are the states
+ * worth testing, and neither is reachable from vitest's node environment.
+ */
+
+/** Where the flow is. Nothing here ever means "signed in" — see `pollSignIn`. */
+export type SignInPhase = "idle" | "waiting" | "blocked" | "returned" | "unreadable";
+
+/** The sliver of `Window` this flow touches, so a test can stand one up. */
+export interface SignInWindow {
+  readonly closed: boolean;
+  focus(): void;
+}
+
+/** `window.open`, narrowed to what is used and injectable. */
+export type OpenWindow = (url: string, target: string, features: string) => SignInWindow | null;
+
+/**
+ * One name for the window. A second click then refocuses the sign-in already
+ * open instead of stacking another one behind it — which matters here, because
+ * a duplicate window would also restart a half-typed sign-in.
+ */
+export const SIGN_IN_WINDOW_NAME = "vibers-live-chat";
+
+/**
+ * Sized like a chat column rather than a browser. `popup=yes` is what asks for
+ * a window instead of a tab — phones ignore it and open a tab, which is fine.
+ *
+ * `noopener` must never appear here: it nulls the returned handle, and the
+ * handle is the only way to notice the viewer coming back.
+ */
+export const SIGN_IN_WINDOW_FEATURES = "popup=yes,width=460,height=700";
+
+export type SignInOpened = { phase: "waiting"; window: SignInWindow } | { phase: "blocked" };
+
+/**
+ * Ask for the window. `null` is a popup blocker; a handle that is *already*
+ * closed is an extension's stub — neither is a window the viewer can sign into,
+ * so both land on `blocked`, where the panel points at the plain link instead.
+ */
+export function openSignIn(url: string, open: OpenWindow): SignInOpened {
+  let win: SignInWindow | null;
+  try {
+    win = open(url, SIGN_IN_WINDOW_NAME, SIGN_IN_WINDOW_FEATURES);
+  } catch {
+    return { phase: "blocked" };
+  }
+  if (!win || win.closed) return { phase: "blocked" };
+  try {
+    // Refocusing a window that is already open is the whole point of naming it.
+    win.focus();
+  } catch {
+    // A handle we may not touch still counts as opened — don't fail the flow.
+  }
+  return { phase: "waiting", window: win };
+}
+
+/** `closed` on a severed handle can throw; unreadable is treated as gone. */
+export function readClosed(win: SignInWindow): boolean {
+  try {
+    return win.closed;
+  } catch {
+    return true;
+  }
+}
+
+export const SIGN_IN_POLL_MS = 500;
+
+/**
+ * How soon a "closed" window is disbelieved.
+ *
+ * Google's sign-in page sends `Cross-Origin-Opener-Policy-Report-Only:
+ * same-origin` (probed 2026-07-27). Report-only is the step before enforcing,
+ * and on the day it enforces, navigating there severs the browsing-context
+ * group and our handle starts reporting `closed === true` immediately — while
+ * the viewer is still typing their password. A close that fast is therefore
+ * read as *we cannot tell*, never as *they came back*.
+ */
+export const SIGN_IN_GRACE_MS = 1_500;
+
+/** A window nobody closed is not worth polling forever. */
+export const SIGN_IN_LIMIT_MS = 5 * 60_000;
+
+/**
+ * One tick of the watch on the sign-in window.
+ *
+ * The outcome is deliberately weak: cross-origin, the *only* readable fact is
+ * whether the handle still points at an open window. Whether anyone signed in,
+ * and whether that account even has a channel to post from, are both invisible
+ * from here — so `returned` means "that window closed", not "you are signed
+ * in", and the panel's copy is written to match.
+ */
+export function pollSignIn(closed: boolean, elapsedMs: number): SignInPhase {
+  if (closed) return elapsedMs < SIGN_IN_GRACE_MS ? "unreadable" : "returned";
+  return elapsedMs >= SIGN_IN_LIMIT_MS ? "unreadable" : "waiting";
+}
+
+/** True once the sign-in window is done with — the frame may be worth a reload. */
+export function canReloadChat(phase: SignInPhase): boolean {
+  return phase === "returned" || phase === "unreadable";
+}

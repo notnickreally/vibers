@@ -177,6 +177,38 @@ export function liveChatPopoutUrl(videoId: string): string | null {
   return `https://www.youtube.com/live_chat?${params}`;
 }
 
+/**
+ * The sign-in that ends in *this stream's* chat, ready to post.
+ *
+ * Posting needs a YouTube account, and a YouTube sign-in can only happen in a
+ * top-level window — `accounts.google.com` answers `X-Frame-Options: DENY`, so
+ * the **Sign in** button inside the framed chat above is a dead end no matter
+ * what we do out here. This is the URL the panel opens in a real window.
+ *
+ * It is YouTube's own redirector rather than a hand-built `accounts.google.com`
+ * URL, and that is the whole point of it existing:
+ *
+ * - YouTube mints the Gaia URL, so the half-dozen parameters that make the
+ *   flow work (`service`, `uilel`, `flowName`, …) are theirs to keep correct.
+ * - It sets `passive=true`, so someone already signed in is waved straight
+ *   through to the chat instead of being asked to log in again.
+ * - The return trip runs back through `youtube.com/signin?action_handle_signin`,
+ *   which is what establishes the *YouTube* session — not merely the Google
+ *   one. A `continue=` pointed straight at the chat skips that step.
+ *
+ * `next` is same-origin and relative on purpose: YouTube only honours its own
+ * paths there, and a relative one is also the only kind that can't be turned
+ * into an open redirect by whatever ends up calling this.
+ *
+ * Verified against www.youtube.com, 2026-07-27: `303` → `ServiceLogin?…
+ * passive=true…continue=…%2Fsignin%3Faction_handle_signin%3Dtrue…`.
+ */
+export function liveChatSignInUrl(videoId: string): string | null {
+  if (!ID.test(videoId)) return null;
+  const next = `/live_chat?${new URLSearchParams({ v: videoId, is_popout: "1" })}`;
+  return `https://www.youtube.com/signin?${new URLSearchParams({ next })}`;
+}
+
 /** Hostnames YouTube will compare against: letters, digits, dots, hyphens. */
 const HOSTNAME = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*$/;
 

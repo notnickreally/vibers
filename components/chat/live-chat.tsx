@@ -3,6 +3,7 @@
 import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import { LiveBadge } from "@/components/ui/bits";
 import {
+  canReloadChat,
   type ChatMessage,
   type ChatTab,
   clearMessages,
@@ -13,21 +14,41 @@ import {
   MAX_BODY,
   MAX_HANDLE,
   mintHandle,
+  openSignIn,
+  pollSignIn,
+  readClosed,
   saveHandle,
   sendMessage,
+  SIGN_IN_POLL_MS,
+  type SignInPhase,
+  type SignInWindow,
   stamp,
 } from "@/lib/chat";
-import { liveChatPopoutUrl, liveChatUrl } from "@/lib/youtube";
+import { liveChatPopoutUrl, liveChatSignInUrl, liveChatUrl } from "@/lib/youtube";
 
 /**
  * The chat under the picture — two tabs over the same panel.
  *
  * **Live chat** is the stream's real one, carried in YouTube's own framable
  * `live_chat` document. No API key and no quota: the frame does its own
- * fetching, so vibers.tv never holds a message. Reading needs no account;
- * posting needs a YouTube sign-in, inside their frame, where we never see it.
+ * fetching, so vibers.tv never holds a message. Reading needs no account.
  * `lib/youtube.ts` documents the three non-obvious rules that make the frame
  * load at all.
+ *
+ * **Posting needs a sign-in, and it cannot happen in that frame.** Google
+ * answers `X-Frame-Options: DENY` on its login, so the *Sign in* button inside
+ * YouTube's embedded chat is a dead end — which is why this panel opens a real
+ * top-level window instead, on YouTube's own `/signin?next=…` redirector,
+ * landing the viewer in *this stream's* pop-out chat with a composer. vibers.tv
+ * never sees a credential: the whole exchange happens on Google's origin.
+ *
+ * That window is also where posting keeps working afterwards. Safari's ITP and
+ * Firefox's Total Cookie Protection partition YouTube's cookies inside our
+ * frame, so a session established up there does not necessarily reach down
+ * here, and no amount of reloading moves it between jars — the call that would,
+ * `requestStorageAccess()`, belongs to YouTube's document, not ours. So the
+ * reload is offered as a *maybe*, worded as one, and the frame is presented as
+ * the read-along it reliably is.
  *
  * **Notes** is what this panel used to be in full: your own transcript against
  * this video, kept in this browser and sent nowhere, live across your own tabs
@@ -51,6 +72,26 @@ const PINNED_SLACK = 48;
 
 const TABS: ChatTab[] = ["live", "notes"];
 
+/**
+ * What the panel says while a sign-in is in flight.
+ *
+ * None of it claims a session. The window is cross-origin — whether anyone
+ * signed in, and whether that account has a channel to post from, are both
+ * unreadable from here — so every line describes what *we* did or what the
+ * viewer can do next, and the reload is offered as a maybe rather than a fix.
+ */
+const SIGN_IN_STATUS: Record<SignInPhase, string> = {
+  idle: "",
+  waiting:
+    "Sign-in window open. Finish there, then post from that window — it is this stream's chat, and it works in every browser.",
+  blocked:
+    "Your browser blocked that window. Open chat on YouTube instead — a plain link is never blocked, and you can sign in and post from there.",
+  returned:
+    "That window closed. Posting keeps working in it. If this browser also lets YouTube use its cookies inside the frame, reloading may pick your session up here — Safari and Firefox keep them apart, so it may not.",
+  unreadable:
+    "That window is YouTube's, so we cannot tell when you are done with it. Post from there, and reload here whenever you come back.",
+};
+
 export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolean }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [handle, setHandle] = useState("");
@@ -59,9 +100,16 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState<ChatTab>(() => initialTab(isLive));
   const [host, setHost] = useState<string | null>(null);
+  const [phase, setPhase] = useState<SignInPhase>("idle");
+  // Bumped to remount the frame, which is the only way to make it re-ask
+  // YouTube who you are. Never minted during render — it's a counter, not a
+  // random draw, so the server and the first client paint always agree.
+  const [frameNonce, setFrameNonce] = useState(0);
   const logRef = useRef<HTMLOListElement>(null);
   const pinnedRef = useRef(true);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const winRef = useRef<SignInWindow | null>(null);
+  const reloadRef = useRef<HTMLButtonElement>(null);
   // Once someone has picked a tab, a late `isLive` must not pull it back.
   const touchedRef = useRef(false);
 
@@ -80,6 +128,12 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
     setReady(true);
     // A different video is a fresh choice, not a continuation of the last one.
     touchedRef.current = false;
+    // The sign-in was for *that* stream's chat, so it doesn't carry over — and
+    // a stale "reload this frame" offer would point at a frame that no longer
+    // exists. The window itself is left alone; it is the viewer's now.
+    winRef.current = null;
+    setPhase("idle");
+    setFrameNonce(0);
   }, [videoId]);
 
   // The embed domain has to be the live hostname, which only exists in a
@@ -125,6 +179,28 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
     if (!log || !pinnedRef.current) return;
     log.scrollTop = log.scrollHeight;
   }, [tab]);
+
+  // Watch the sign-in window for the viewer coming back. There is no event for
+  // it — `window.close` fires inside the closing window, which is YouTube's,
+  // not ours — so a poll is the whole mechanism. It stops itself on the first
+  // conclusive tick, on unmount, and on the cap inside `pollSignIn`.
+  useEffect(() => {
+    const win = winRef.current;
+    if (phase !== "waiting" || !win) return;
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      const next = pollSignIn(readClosed(win), Date.now() - startedAt);
+      if (next !== "waiting") setPhase(next);
+    }, SIGN_IN_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [phase]);
+
+  // Coming back from the window swaps the controls under the reader's cursor,
+  // so put the caret on the thing that just appeared rather than dropping focus
+  // to the top of the document.
+  useEffect(() => {
+    if (canReloadChat(phase)) reloadRef.current?.focus();
+  }, [phase]);
 
   const onScroll = useCallback(() => {
     const log = logRef.current;
@@ -175,9 +251,33 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
     setError("");
   }
 
+  function onSignIn(url: string) {
+    // Already up: bring it forward rather than reopening — a second navigation
+    // would throw away a half-typed password.
+    const open = winRef.current;
+    if (open && !readClosed(open)) {
+      open.focus();
+      setPhase("waiting");
+      return;
+    }
+    const result = openSignIn(url, (u, target, features) => window.open(u, target, features));
+    winRef.current = result.phase === "waiting" ? result.window : null;
+    setPhase(result.phase);
+  }
+
+  function onReloadChat() {
+    setFrameNonce((n) => n + 1);
+    setPhase("idle");
+  }
+
   const live = isLive === true;
+  // Confirmed over: YouTube keeps the transcript but takes the composer away,
+  // so there is nothing here to sign in *for*.
+  const ended = isLive === false;
   const chatUrl = host ? liveChatUrl(videoId, host) : null;
   const popoutUrl = liveChatPopoutUrl(videoId);
+  const signInUrl = liveChatSignInUrl(videoId);
+  const showReload = canReloadChat(phase);
   const inputBase =
     "border border-edge bg-ink px-3 py-2 font-mono text-[12px] text-bone placeholder:text-faint focus:border-amber focus:outline-none";
   const tabBase =
@@ -286,6 +386,11 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
           </div>
         ) : (
           <iframe
+            // Remounting is the only lever we have on this frame: it is
+            // cross-origin, so its document cannot be told to reload, and
+            // pointing `src` at a cache-buster would break the exact-match
+            // `embed_domain` bargain. A new key is a new element and a new load.
+            key={frameNonce}
             src={chatUrl}
             title="Live chat"
             // Below the player and usually below the fold — the same reason the
@@ -304,23 +409,79 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
 
         {/* Permanent, not revealed on a timer. A refused frame looks exactly
             like a loading one from out here, so there is nothing to wait for —
-            the honest move is to name the cases and always offer the way out. */}
-        <div className="flex flex-wrap items-center gap-3 border-t border-edge-soft px-4 py-3">
-          <p className="min-w-0 flex-1 font-mono text-[10px] leading-relaxed text-faint">
-            Chat comes from YouTube. It stays empty if the stream isn&apos;t live, the channel
-            turned chat off, or your browser blocks YouTube&apos;s cookies — Safari does by
-            default. Posting needs a YouTube sign-in.
-          </p>
-          {popoutUrl && (
-            <a
-              href={popoutUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="shrink-0 border border-edge px-3 py-1.5 font-mono text-[10px] tracking-[0.1em] text-teal uppercase transition-colors hover:border-teal"
+            the honest move is to name the cases and always offer the way out.
+
+            The link stays an ordinary anchor, and it is the base layer rather
+            than a fallback: it needs no JavaScript, a popup blocker cannot stop
+            it, and it is where the blocked state sends people. The button above
+            it is the enhancement — same destination, one fewer sign-in click. */}
+        <div className="border-t border-edge-soft px-4 py-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="min-w-0 flex-1 font-mono text-[10px] leading-relaxed text-faint">
+              {ended ? (
+                <>
+                  This broadcast has ended, so its chat is closed to new messages — there is
+                  nothing left to sign in for. YouTube still shows the transcript where the
+                  channel kept one.
+                </>
+              ) : (
+                <>
+                  Chat comes from YouTube. It stays empty if the stream isn&apos;t live, the
+                  channel turned chat off, or your browser blocks YouTube&apos;s cookies — Safari
+                  does by default. Posting happens in a YouTube window, on an account with a
+                  channel; vibers.tv never sees your sign-in.
+                </>
+              )}
+            </p>
+            {!ended && signInUrl && (
+              <button
+                type="button"
+                onClick={() => onSignIn(signInUrl)}
+                className="shrink-0 bg-amber px-3 py-1.5 font-mono text-[10px] font-semibold tracking-[0.1em] text-ink uppercase transition-colors hover:bg-bone"
+              >
+                {phase === "waiting" ? "Finish signing in ↗" : "Sign in to post ↗"}
+                {/* The glyph is decoration; the promise has to be in the name. */}
+                <span className="sr-only"> (opens a new window)</span>
+              </button>
+            )}
+            {popoutUrl && (
+              <a
+                href={popoutUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 border border-edge px-3 py-1.5 font-mono text-[10px] tracking-[0.1em] text-teal uppercase transition-colors hover:border-teal"
+              >
+                Open chat on YouTube ↗<span className="sr-only"> (opens a new tab)</span>
+              </a>
+            )}
+          </div>
+
+          {/* Mounted at every phase, empty at idle: a live region has to be in
+              the document *before* its text changes, or the change goes
+              unannounced. Polite, never assertive — none of this interrupts. */}
+          <div
+            className={`flex flex-wrap items-center gap-3 ${phase === "idle" ? "" : "mt-3"}`}
+          >
+            <p
+              role="status"
+              aria-live="polite"
+              className={`min-w-0 flex-1 font-mono text-[10px] leading-relaxed ${
+                phase === "blocked" ? "text-del" : "text-amber"
+              }`}
             >
-              Open chat on YouTube ↗
-            </a>
-          )}
+              {SIGN_IN_STATUS[phase]}
+            </p>
+            {showReload && (
+              <button
+                ref={reloadRef}
+                type="button"
+                onClick={onReloadChat}
+                className="shrink-0 border border-edge px-3 py-1.5 font-mono text-[10px] tracking-[0.1em] text-bone uppercase transition-colors hover:border-amber hover:text-amber"
+              >
+                Reload chat
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
