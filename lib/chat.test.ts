@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   chatKey,
   clearMessages,
+  initialTab,
   isChatKey,
   listMessages,
   loadHandle,
@@ -190,6 +191,24 @@ describe("stamp", () => {
   it("is a zero-padded wall clock", () => {
     const at = new Date(2026, 0, 2, 9, 5).getTime();
     expect(stamp(at)).toBe("09:05");
+  });
+});
+
+describe("initialTab", () => {
+  it("opens on the live chat for a confirmed live stream", () => {
+    expect(initialTab(true)).toBe("live");
+  });
+
+  it("opens on the notes only when the stream is confirmed not live", () => {
+    expect(initialTab(false)).toBe("notes");
+  });
+
+  it("opens on the live chat when liveness is unknown", () => {
+    // The load-bearing case: without a YOUTUBE_API_KEY every stream reads
+    // undefined, so treating unknown as "not live" would hide the live chat
+    // on every video the site has.
+    expect(initialTab(undefined)).toBe("live");
+    expect(initialTab()).toBe("live");
   });
 });
 

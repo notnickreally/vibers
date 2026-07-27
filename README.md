@@ -30,6 +30,20 @@ underneath — play/pause, mute, volume, fullscreen, and a *jump to live* button
 that only appears on streams confirmed live. Space and `M` work as shortcuts.
 The title, channel and description sit under the picture.
 
+**Chat.** Under the picture, in two tabs. **Live chat** is the stream's real
+one, carried in YouTube's own embedded `live_chat` frame — no API key, no
+quota, and vibers.tv never holds a message. Reading needs no account; posting
+needs a YouTube sign-in, inside their frame. **Notes** is your own transcript
+against the video, kept in this browser and sent nowhere, live across your own
+tabs. It's what works on a VOD, where there is no chat to carry.
+
+The frame is opaque to us by design, which has one honest consequence: when it
+comes up empty — the stream isn't live, the channel turned chat off, or the
+browser blocks YouTube's cookies, as Safari does by default — the page cannot
+tell that apart from a chat that is simply quiet. So it never guesses. It names
+those cases under the frame and always offers **Open chat on YouTube ↗**, which
+is the one fallback that works in every case.
+
 ## Metadata
 
 `app/api/youtube/route.ts` resolves a video in two steps:
@@ -47,7 +61,12 @@ YOUTUBE_API_KEY=your-key-here
 
 Without the key you get titles and channels but no descriptions, and streams are
 never labelled LIVE — because we can't confirm it, and guessing would be
-inventing. Anything unresolved stays undefined rather than being filled in.
+inventing. Anything unresolved stays undefined rather than being filled in. The
+chat panel says so on the stream itself rather than leaving a dark tally lamp
+unexplained.
+
+The live chat needs none of this. It rides YouTube's own frame, so it works
+with zero setup whether or not a key is set.
 
 ## The clean picture — what's possible and what isn't
 
@@ -77,7 +96,7 @@ before anyone judges it.
 | Route | What's there |
 | --- | --- |
 | `/` | The wall — add streams, posters/monitors view, grid sizing |
-| `/watch/[id]` | One stream on the clean player, with title, channel and description |
+| `/watch/[id]` | One stream on the clean player, with title, channel, description, and the chat panel |
 | `/report` | Takedown path for a creator |
 | `/api/youtube?v=` | Metadata lookup (oEmbed, plus Data API when a key is set) |
 
@@ -103,4 +122,6 @@ Grotesque, Instrument Sans and JetBrains Mono.
 ## Not built yet
 
 Accounts, a shared/public wall, and auto-refreshing live status. All three need
-a backend.
+a backend. So does a chat of our own — the live chat you see is YouTube's,
+rendered by YouTube; the notes tab is the local stand-in for the half that
+would be ours.
