@@ -22,12 +22,18 @@ import {
   fractionFromPointer,
   fractionOf,
   isFiniteNumber,
+  lagBehind,
+  liveEdge,
+  type LiveLag,
   liveOffsetLabel,
   narrowDvr,
   type Phase,
   pictureCover,
   positionAt,
+  type SeekWindow,
   seekWindow,
+  shiftLag,
+  trackLag,
 } from "@/lib/player-time";
 import { posterFallbackUrl, posterUrl } from "@/lib/youtube";
 
@@ -173,6 +179,31 @@ function embedSrc(videoId: string, start?: number): string {
 /** How often we read the clock off the player. Smooth without being greedy. */
 const TICK_MS = 250;
 
+/**
+ * How long a seek gets to settle before we read anything into where it landed.
+ *
+ * Two races live in the gap between asking for a seek and the player performing
+ * one, and both of them bite when the back button is pressed faster than the
+ * poll runs:
+ *
+ * - The poll would overwrite the optimistic position with the player's *old*
+ *   time — it has not moved yet — so the next nudge starts from where the last
+ *   one did and ten presses walk back sixty seconds instead of six hundred.
+ * - `narrowDvr` would compare the newest aim against a position from before any
+ *   of the seeks, read the difference as YouTube refusing the seek, and shrink
+ *   the DVR window to its floor. Measured: ten presses at 120ms collapsed a
+ *   four-hour window to sixty seconds and emptied the bar.
+ *
+ * So a seek is judged only once the player is PLAYING again and this much time
+ * has passed, and every fresh seek restarts the clock — which means a burst of
+ * presses is judged once, when it stops, rather than once per press.
+ */
+const SEEK_SETTLE_MS = 1200;
+
+/** After this long an unsettled seek is abandoned, so a seek that never lands
+ *  cannot freeze the readout for the rest of the session. */
+const SEEK_ABANDON_MS = 5000;
+
 /** What YouTube says when it won't be embedded — worth saying plainly. */
 const EMBED_REFUSED = new Set([101, 150]);
 
@@ -218,12 +249,25 @@ export function CleanPlayer({
 
   // Playback clock, polled — never read during render from the player itself.
   const [position, setPosition] = useState(0);
-  const [edge, setEdge] = useState(0);
+  // What YouTube claims the duration is. Correct for a recording, and for a
+  // live stream not to be believed at all — see the live-edge note in
+  // `lib/player-time`. Kept because `liveEdge` still needs it for the VOD case.
+  const [duration, setDuration] = useState(0);
+  // How far behind the live edge we have measured ourselves to be. The lag
+  // estimate it comes from lives in a ref rather than state: it is folded four
+  // times a second and only this rounded number ever needs to reach the DOM.
+  const [behind, setBehind] = useState(0);
+  const lagRef = useRef<LiveLag | null>(null);
   const [dvrSeconds, setDvrSeconds] = useState(DEFAULT_DVR_SECONDS);
 
-  // While a finger is down the bar follows the finger, not the poll.
+  // While a finger is down the bar follows the finger, not the poll — and it
+  // measures against the window the drag started on, not one that has moved
+  // since.
   const [scrub, setScrub] = useState<number | null>(null);
-  const seekAimRef = useRef<number | null>(null);
+  const dragWinRef = useRef<SeekWindow | null>(null);
+  // Where the last seek was aimed, and when — the timestamp is what lets a
+  // burst of presses be judged once, after it stops. See `SEEK_SETTLE_MS`.
+  const seekAimRef = useRef<{ target: number; at: number } | null>(null);
   // Where a *mouse* is hovering the bar, so it can say what is under the
   // cursor before you commit to it. Null on touch, which has no hover.
   const [hover, setHover] = useState<number | null>(null);
@@ -255,7 +299,9 @@ export function CleanPlayer({
     setReady(false);
     setFailure("");
     setPosition(0);
-    setEdge(0);
+    setDuration(0);
+    setBehind(0);
+    lagRef.current = null;
     setDvrSeconds(DEFAULT_DVR_SECONDS);
     setPhase("cold");
     setHasPlayed(false);
@@ -329,29 +375,80 @@ export function CleanPlayer({
     if (iframeRef.current) iframeRef.current.title = title ?? "Stream";
   }, [title]);
 
-  // The clock. A live stream's duration keeps growing, and that growing number
-  // is the only live edge YouTube exposes — so remember the furthest we've seen.
+  // The clock.
+  //
+  // A live stream's duration does NOT keep growing — measured against real
+  // embeds it does not move at all, and it routinely sits an hour ahead of the
+  // playhead. `lib/player-time` carries the measurement and the reasoning; the
+  // upshot here is that the live edge is measured from the playhead against a
+  // monotonic clock, and `getDuration()` is only believed for a recording.
+  //
+  // Everything this tick needs, it reads or derives inside the tick. The effect
+  // is deliberately kept on `[ready, live]` deps, so anything read out of render
+  // scope would be frozen at the value it had when the timer was built — which
+  // is exactly how the old `narrowDvr` call came to be fed a raw duration.
   useEffect(() => {
     if (!ready) return;
     const id = setInterval(() => {
       const p = playerRef.current;
       if (!p) return;
 
-      const duration = p.getDuration();
+      const reported = p.getDuration();
       const current = p.getCurrentTime();
-      if (isFiniteNumber(duration) && duration > 0) {
-        setEdge((prev) => (live ? Math.max(prev, duration) : duration));
+      const now = performance.now();
+      const states = window.YT?.PlayerState;
+      const state = p.getPlayerState();
+      if (isFiniteNumber(reported) && reported > 0) setDuration(reported);
+
+      // Is a seek still in flight? Until the player has actually moved, its
+      // clock still reads the old time — so nothing may be read off it.
+      const aim = seekAimRef.current;
+      const age = aim === null ? 0 : now - aim.at;
+      const landed = aim === null || !isFiniteNumber(current) || Math.abs(current - aim.target) < 2;
+      const pending = aim !== null && !landed && age < SEEK_ABANDON_MS;
+
+      if (isFiniteNumber(current) && !pending) setPosition(current);
+
+      let lag = lagRef.current;
+      if (live && isFiniteNumber(current) && !pending) {
+        // The play state is read off the player, not off our `phase` state, for
+        // the same stale-closure reason as everything else in here.
+        const moving = Boolean(
+          states && (state === states.PLAYING || state === states.BUFFERING),
+        );
+
+        // A stall is not a pause: the viewer keeps falling behind through it,
+        // and the readout should say so — so BUFFERING samples count too. They
+        // cannot corrupt the live-edge floor, because a frozen playhead under a
+        // running clock only ever pushes slack *up*, and the floor is a minimum.
+        if (moving) {
+          lag = trackLag(lag, now / 1000, current);
+          lagRef.current = lag;
+        }
+        // Rounded, so a number that hasn't meaningfully changed doesn't re-render
+        // the whole player four times a second.
+        const next = Math.round(lagBehind(lag));
+        setBehind((prev) => (prev === next ? prev : next));
       }
-      if (isFiniteNumber(current)) setPosition(current);
 
       // A seek that lands well ahead of where it was aimed means the DVR
-      // window is shorter than we were offering. Believe the stream.
-      const aim = seekAimRef.current;
-      if (live && aim !== null && isFiniteNumber(current) && isFiniteNumber(duration)) {
+      // window is shorter than we were offering. Believe the stream — but only
+      // once it has settled, so a burst of presses is judged once rather than
+      // measured against a position none of them had reached yet.
+      const settled = Boolean(states && state === states.PLAYING) && age >= SEEK_SETTLE_MS;
+      if (live && aim !== null && isFiniteNumber(current) && (settled || age >= SEEK_ABANDON_MS)) {
         seekAimRef.current = null;
-        setDvrSeconds((prev) =>
-          narrowDvr({ dvrSeconds: prev, requested: aim, landed: current, edge: duration }),
-        );
+        if (settled) {
+          const edgeNow = liveEdge({
+            live,
+            duration: reported,
+            position: current,
+            behind: lagBehind(lag),
+          });
+          setDvrSeconds((prev) =>
+            narrowDvr({ dvrSeconds: prev, requested: aim.target, landed: current, edge: edgeNow }),
+          );
+        }
       }
     }, TICK_MS);
     return () => clearInterval(id);
@@ -390,7 +487,15 @@ export function CleanPlayer({
     };
   }, []);
 
-  const win = seekWindow({ edge, isLive: live, dvrSeconds });
+  const edge = liveEdge({ live, duration, position, behind });
+  const liveWin = seekWindow({ edge, isLive: live, dvrSeconds });
+  // A drag holds the window it started on. `win` is derived from `position`,
+  // which keeps advancing during playback, so an unfrozen window slides under
+  // the finger at a second per second — and a finger that has stopped moving
+  // fires no pointer event, so nothing recomputes and the knob drifts backwards
+  // on its own. Against a window `narrowDvr` has shrunk to its 60s floor that
+  // is an 8% error on a five-second drag.
+  const win = scrub !== null && dragWinRef.current ? dragWinRef.current : liveWin;
   // Clamped: the polled clock can read a second or two past the duration
   // YouTube reports, and a readout beyond the end reads as a bug.
   const shown = clamp(scrub ?? position, win.start, win.end);
@@ -407,17 +512,29 @@ export function CleanPlayer({
   // works — before `ready` the transport is disabled and the wait is ours.
   const label = coverLabel({ phase, hasPlayed, failure, stalled: stalled && ready });
 
-  const seek = useCallback(
-    (seconds: number) => {
-      const p = playerRef.current;
-      if (!p) return;
-      const target = Math.max(0, seconds);
-      seekAimRef.current = target;
-      p.seekTo(target, true);
-      setPosition(target);
-    },
-    [],
-  );
+  const seek = useCallback((seconds: number) => {
+    const p = playerRef.current;
+    if (!p) return;
+    const target = Math.max(0, seconds);
+    // Where we are *for the purposes of this seek*: a seek still in flight has
+    // already moved the readout, and the player's own clock has not caught up
+    // yet, so chaining off the last aim is what makes a burst of presses add up
+    // instead of each one re-measuring from the same stale place.
+    const previous = seekAimRef.current;
+    const from = previous ? previous.target : p.getCurrentTime();
+    seekAimRef.current = { target, at: performance.now() };
+    p.seekTo(target, true);
+    setPosition(target);
+    // Move the lag with the intent. On a live stream `position` cancels out of
+    // the bar's fill — what the bar shows is how far back in the window you
+    // are — so moving the playhead alone moves nothing on screen, and the knob
+    // would sit frozen through the buffering that follows and then jump.
+    if (isFiniteNumber(from)) {
+      const next = shiftLag(lagRef.current, from - target);
+      lagRef.current = next;
+      setBehind(Math.round(lagBehind(next)));
+    }
+  }, []);
 
   const nudge = useCallback(
     (delta: number) => {
@@ -453,13 +570,23 @@ export function CleanPlayer({
   const goLive = useCallback(() => {
     const p = playerRef.current;
     if (!p) return;
-    // Landing exactly on the edge can trip ENDED; stop just short of it.
-    const target = Math.max(0, (isFiniteNumber(edge) && edge > 0 ? edge : p.getDuration()) - 2);
+    const from = seekAimRef.current?.target ?? p.getCurrentTime();
+    if (!isFiniteNumber(from)) return;
+    // Forward by exactly the offset we have measured. Landing exactly on the
+    // edge can trip ENDED — which would put the slate over live footage — so
+    // stop just short of it, as this has always done.
+    const target = Math.max(0, from + lagBehind(lagRef.current) - 2);
     seekAimRef.current = null;
     p.seekTo(target, true);
     p.playVideo();
     setPosition(target);
-  }, [edge]);
+    // Re-baseline rather than trusting the seek to land on the floor. A resync
+    // on a normal-latency stream routinely settles ten or twenty seconds back,
+    // and a Live button that stays lit after being pressed invites a re-seek
+    // loop, each one costing a rebuffer.
+    lagRef.current = null;
+    setBehind(0);
+  }, []);
 
   const toggleFullscreen = useCallback(() => {
     const doc = document as FullscreenDocument;
@@ -545,6 +672,8 @@ export function CleanPlayer({
   function onBarPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (!seekable) return;
     e.currentTarget.setPointerCapture(e.pointerId);
+    // Hold this window for the whole gesture, release included.
+    dragWinRef.current = win;
     setScrub(positionAt(fractionAt(e.clientX), win));
   }
 
@@ -560,8 +689,9 @@ export function CleanPlayer({
 
   function onBarPointerUp(e: React.PointerEvent<HTMLDivElement>) {
     if (scrub === null) return;
-    const target = positionAt(fractionAt(e.clientX), win);
+    const target = positionAt(fractionAt(e.clientX), dragWinRef.current ?? win);
     e.currentTarget.releasePointerCapture?.(e.pointerId);
+    dragWinRef.current = null;
     setScrub(null);
     seek(target);
     // Scrubbing a paused picture is how you study a frame now that there is
