@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  canReloadChat,
   chatKey,
   clearMessages,
   initialTab,
@@ -12,9 +13,18 @@ import {
   mintHandle,
   normalizeBody,
   normalizeHandle,
+  openSignIn,
+  type OpenWindow,
   parseMessages,
+  pollSignIn,
+  readClosed,
   saveHandle,
   sendMessage,
+  SIGN_IN_GRACE_MS,
+  SIGN_IN_LIMIT_MS,
+  SIGN_IN_WINDOW_FEATURES,
+  SIGN_IN_WINDOW_NAME,
+  type SignInWindow,
   stamp,
 } from "./chat";
 
@@ -209,6 +219,151 @@ describe("initialTab", () => {
     // on every video the site has.
     expect(initialTab(undefined)).toBe("live");
     expect(initialTab()).toBe("live");
+  });
+});
+
+/**
+ * The sign-in window.
+ *
+ * A popup blocker, an adblocker's stub window, and a browsing context severed
+ * by COOP are the three states worth getting right, and not one of them is
+ * reachable from vitest's node environment — so `openSignIn` takes its opener
+ * the same way the store takes its `Storage`, and all three are just arguments.
+ */
+class FakeWindow implements SignInWindow {
+  closed = false;
+  focused = 0;
+  constructor(closed = false) {
+    this.closed = closed;
+  }
+  focus(): void {
+    this.focused += 1;
+  }
+}
+
+const URL_ = "https://www.youtube.com/signin?next=%2Flive_chat";
+
+describe("openSignIn", () => {
+  it("opens one named window, sized like a chat column", () => {
+    const calls: Array<[string, string, string]> = [];
+    const open: OpenWindow = (url, target, features) => {
+      calls.push([url, target, features]);
+      return new FakeWindow();
+    };
+    const result = openSignIn(URL_, open);
+
+    expect(result.phase).toBe("waiting");
+    expect(calls).toEqual([[URL_, SIGN_IN_WINDOW_NAME, SIGN_IN_WINDOW_FEATURES]]);
+  });
+
+  it("never asks for noopener — that would null the handle it needs", () => {
+    // The handle is the only way to notice the viewer coming back, so this is
+    // a real constraint on the features string rather than a style note.
+    expect(SIGN_IN_WINDOW_FEATURES).not.toContain("noopener");
+    expect(SIGN_IN_WINDOW_NAME).toBeTruthy();
+  });
+
+  it("brings the window forward", () => {
+    const win = new FakeWindow();
+    openSignIn(URL_, () => win);
+    expect(win.focused).toBe(1);
+  });
+
+  it("still counts as opened when the handle refuses to be focused", () => {
+    const win: SignInWindow = {
+      closed: false,
+      focus() {
+        throw new Error("cross-origin");
+      },
+    };
+    expect(openSignIn(URL_, () => win)).toEqual({ phase: "waiting", window: win });
+  });
+
+  it("reads a null window as blocked", () => {
+    expect(openSignIn(URL_, () => null)).toEqual({ phase: "blocked" });
+  });
+
+  it("reads a throwing opener as blocked", () => {
+    expect(
+      openSignIn(URL_, () => {
+        throw new Error("blocked");
+      }),
+    ).toEqual({ phase: "blocked" });
+  });
+
+  it("reads an already-closed handle as blocked, not as a sign-in", () => {
+    // An extension's stub window: neither null nor usable. Treating it as open
+    // would strand the viewer watching a window that was never there.
+    expect(openSignIn(URL_, () => new FakeWindow(true))).toEqual({ phase: "blocked" });
+  });
+});
+
+describe("readClosed", () => {
+  it("reports what the handle says", () => {
+    expect(readClosed(new FakeWindow(false))).toBe(false);
+    expect(readClosed(new FakeWindow(true))).toBe(true);
+  });
+
+  it("treats a handle it may not read as gone", () => {
+    const severed = {
+      get closed(): boolean {
+        throw new Error("cross-origin");
+      },
+      focus() {},
+    };
+    expect(readClosed(severed)).toBe(true);
+  });
+});
+
+describe("pollSignIn", () => {
+  it("keeps waiting while the window is open", () => {
+    expect(pollSignIn(false, 0)).toBe("waiting");
+    expect(pollSignIn(false, 30_000)).toBe("waiting");
+  });
+
+  it("calls it returned once the window closes", () => {
+    expect(pollSignIn(true, SIGN_IN_GRACE_MS)).toBe("returned");
+    expect(pollSignIn(true, 90_000)).toBe("returned");
+  });
+
+  it("disbelieves a window that closes instantly — that is COOP, not a viewer", () => {
+    // Google's sign-in already sends Cross-Origin-Opener-Policy-Report-Only:
+    // same-origin. When that enforces, the handle reports closed the moment
+    // the page loads, while the password is still being typed. Announcing
+    // "you're back" there would be a lie with a button under it.
+    expect(pollSignIn(true, 0)).toBe("unreadable");
+    expect(pollSignIn(true, SIGN_IN_GRACE_MS - 1)).toBe("unreadable");
+  });
+
+  it("stops watching a window nobody ever closes", () => {
+    expect(pollSignIn(false, SIGN_IN_LIMIT_MS)).toBe("unreadable");
+    expect(pollSignIn(false, SIGN_IN_LIMIT_MS + 1)).toBe("unreadable");
+    // A tab on a phone is the ordinary case: the features string is ignored,
+    // the viewer switches back rather than closing, and the poll never lands.
+  });
+
+  it("never reports a signed-in state, because there isn't one to read", () => {
+    const seen = new Set([
+      pollSignIn(true, 0),
+      pollSignIn(true, 10_000),
+      pollSignIn(false, 10_000),
+      pollSignIn(false, SIGN_IN_LIMIT_MS),
+    ]);
+    expect([...seen].sort()).toEqual(["returned", "unreadable", "waiting"]);
+  });
+});
+
+describe("canReloadChat", () => {
+  it("offers the reload only once the window is done with", () => {
+    expect(canReloadChat("returned")).toBe(true);
+    expect(canReloadChat("unreadable")).toBe(true);
+  });
+
+  it("does not offer it mid-flow or before one starts", () => {
+    expect(canReloadChat("idle")).toBe(false);
+    expect(canReloadChat("waiting")).toBe(false);
+    // Blocked means no window opened at all — there is nothing new to pick up.
+    expect(canReloadChat("blocked")).toBe(false);
   });
 });
 

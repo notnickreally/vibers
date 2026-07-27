@@ -36,10 +36,31 @@ The title, channel and description sit under the picture.
 
 **Chat.** Under the picture, in two tabs. **Live chat** is the stream's real
 one, carried in YouTube's own embedded `live_chat` frame — no API key, no
-quota, and vibers.tv never holds a message. Reading needs no account; posting
-needs a YouTube sign-in, inside their frame. **Notes** is your own transcript
-against the video, kept in this browser and sent nowhere, live across your own
-tabs. It's what works on a VOD, where there is no chat to carry.
+quota, and vibers.tv never holds a message. Reading needs no account. **Notes**
+is your own transcript against the video, kept in this browser and sent nowhere,
+live across your own tabs. It's what works on a VOD, where there is no chat to
+carry.
+
+**Posting.** *Sign in to post* opens a real window on YouTube's own
+`/signin?next=…` redirector, landing you in that stream's pop-out chat with a
+composer. It has to be a window: `accounts.google.com` answers `X-Frame-Options:
+DENY`, so the **Sign in** button inside the embedded chat is a dead end no
+matter what the page does around it. Going through YouTube's redirector rather
+than a hand-built Google URL is what keeps an already-signed-in viewer from
+being asked again (`passive=true`) and what establishes the *YouTube* session on
+the way back, not merely the Google one. vibers.tv never sees a credential — the
+whole exchange happens on Google's origin, and the panel offers a plain link
+beside the button for anyone whose browser blocks the window.
+
+**Posting keeps happening in that window, and the panel says so.** Safari's ITP
+and Firefox's Total Cookie Protection partition YouTube's cookies inside our
+frame, so a session established up there does not necessarily reach down here,
+and reloading cannot move it between jars — the call that would,
+`requestStorageAccess()`, belongs to YouTube's document rather than ours. So the
+*Reload chat* button is offered as a maybe and worded as one. Nothing in the
+panel ever claims you are signed in: the window is cross-origin, so whether
+anyone signed in — and whether that account even has a channel to post from —
+is unreadable from here.
 
 The frame is opaque to us by design, which has one honest consequence: when it
 comes up empty — the stream isn't live, the channel turned chat off, or the

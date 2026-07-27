@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isVideoId,
   liveChatPopoutUrl,
+  liveChatSignInUrl,
   liveChatUrl,
   MAX_IDS,
   normalizeEmbedDomain,
@@ -114,6 +115,43 @@ describe("liveChatPopoutUrl", () => {
   it("refuses a bad id rather than linking somewhere odd", () => {
     expect(liveChatPopoutUrl("nope")).toBeNull();
     expect(liveChatPopoutUrl("")).toBeNull();
+  });
+});
+
+describe("liveChatSignInUrl", () => {
+  it("signs in through YouTube's own redirector, landing on this chat", () => {
+    expect(liveChatSignInUrl(ID)).toBe(
+      `https://www.youtube.com/signin?next=%2Flive_chat%3Fv%3D${ID}%26is_popout%3D1`,
+    );
+  });
+
+  it("keeps `next` a relative path on youtube.com", () => {
+    // Two reasons, both load-bearing: YouTube only honours its own paths
+    // there, and a relative one cannot be turned into an open redirect.
+    const url = new URL(liveChatSignInUrl(ID) as string);
+    expect(url.origin).toBe("https://www.youtube.com");
+    expect(url.pathname).toBe("/signin");
+    const next = url.searchParams.get("next") as string;
+    expect(next.startsWith("/live_chat?")).toBe(true);
+    expect(next.includes("//")).toBe(false);
+  });
+
+  it("asks for the pop-out, which is the only framing YouTube allows here", () => {
+    // `live_chat` without `is_popout` does not stand up as a top-level page,
+    // and the pop-out answers X-Frame-Options: SAMEORIGIN — so this URL is
+    // only ever correct in a real window, never in the frame above it.
+    const next = new URLSearchParams(
+      new URL(liveChatSignInUrl(ID) as string).search,
+    ).get("next") as string;
+    const params = new URLSearchParams(next.slice(next.indexOf("?")));
+    expect(params.get("v")).toBe(ID);
+    expect(params.get("is_popout")).toBe("1");
+  });
+
+  it("refuses a bad id rather than opening a window on nothing", () => {
+    expect(liveChatSignInUrl("nope")).toBeNull();
+    expect(liveChatSignInUrl("")).toBeNull();
+    expect(liveChatSignInUrl("../../etc/passwd")).toBeNull();
   });
 });
 
