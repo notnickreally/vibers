@@ -37,6 +37,55 @@ export function parseIds(input: string | null, cap: number = MAX_IDS): string[] 
 }
 
 /**
+ * Ids in batches `videos.list` will accept.
+ *
+ * Deliberately not `parseIds`' job. That function is a security gate and its cap
+ * is the upstream limit, so asking it to also size the batches makes one number
+ * do two jobs — and the day the candidate set is larger than one batch, the gate
+ * silently drops the overflow instead of the batcher splitting it. Two numbers,
+ * two functions.
+ */
+export function chunk<T>(items: T[], size: number = MAX_IDS): T[][] {
+  if (size < 1) return [];
+  const out: T[][] = [];
+  for (let i = 0; i < (items?.length ?? 0); i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/** The shape of a `videos.list` item, as much of it as liveness depends on. */
+export interface VideoItem {
+  id?: string;
+  snippet?: { liveBroadcastContent?: string };
+  liveStreamingDetails?: { actualStartTime?: string; actualEndTime?: string };
+}
+
+/**
+ * Is this video on air right now? — the one answer, in one place.
+ *
+ * There used to be two spellings of this, one in `/api/youtube` and one in
+ * `/api/youtube/status`, both reading `liveBroadcastContent === "live"` and no
+ * `actualEndTime`. Discovery would have made a third, and a stream confirmed
+ * live by one rule can then be re-judged by another seconds later — which is
+ * how a tile ends up flickering between shelves. So all three call this.
+ *
+ * The two extra clauses over the old rule are not decoration:
+ *
+ * - **`liveStreamingDetails` must exist at all.** YouTube only carries it for
+ *   something that was once a broadcast, so its absence is what separates a
+ *   plain uploaded video from a stream — the distinction the wall's `cardState`
+ *   already depends on.
+ * - **`actualStartTime` must be present.** It "will not be available until the
+ *   broadcast begins", so it is the field that rules out a scheduled premiere
+ *   that has not started. `liveBroadcastContent` reports those as `upcoming`,
+ *   but only until the moment the index disagrees with the resource.
+ */
+export function isLive(item: VideoItem | undefined): boolean {
+  const details = item?.liveStreamingDetails;
+  if (!details?.actualStartTime || details.actualEndTime) return false;
+  return item?.snippet?.liveBroadcastContent === "live";
+}
+
+/**
  * A URL safe to put in an `href`, or null.
  *
  * The wall lives in localStorage, which is the user's own to edit, so a stored

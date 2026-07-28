@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { parseYouTube } from "@/lib/youtube";
+import { isLive, parseYouTube } from "@/lib/youtube";
 
 /**
  * Look up a video's real metadata.
@@ -80,14 +80,19 @@ async function enrich(meta: Metadata, key: string): Promise<Metadata> {
           liveBroadcastContent?: string;
           publishedAt?: string;
         };
-        liveStreamingDetails?: { concurrentViewers?: string; actualEndTime?: string };
+        liveStreamingDetails?: {
+          concurrentViewers?: string;
+          actualStartTime?: string;
+          actualEndTime?: string;
+        };
       }[];
     };
     const item = data.items?.[0];
     if (!item) return meta;
 
-    const live =
-      item.snippet?.liveBroadcastContent === "live" && !item.liveStreamingDetails?.actualEndTime;
+    // One predicate, shared with `/status` and with auto-sourcing. Three
+    // spellings of "is it live" is how a tile ends up flickering between tabs.
+    const live = isLive(item);
     const viewers = item.liveStreamingDetails?.concurrentViewers;
 
     return {

@@ -3,13 +3,16 @@
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AddStream } from "@/components/wall/add-stream";
+import { AutoSource } from "@/components/wall/auto-source";
 import { EmptyState, WallSkeleton } from "@/components/states";
 import { LiveBadge } from "@/components/ui/bits";
+import type { DiscoverResult } from "@/lib/discover";
 import { compact } from "@/lib/format";
 import { YT_CHROME_MS } from "@/lib/player-time";
 import { safeHttpUrl } from "@/lib/youtube";
 import {
   cardState,
+  clearSourced,
   DEFAULT_MODE,
   initialShelf,
   listStreams,
@@ -20,6 +23,7 @@ import {
   removeStream,
   type Shelf,
   shelf,
+  sourceStreams,
   type Stream,
 } from "@/lib/stream";
 
@@ -49,6 +53,8 @@ export function MonitorWall() {
   const [mode, setMode] = useState<Mode>(DEFAULT_MODE);
   const [size, setSize] = useState<Size>(3);
   const [tab, setTab] = useState<Shelf>("live");
+  const [sourcing, setSourcing] = useState<"idle" | "sourcing" | "done">("idle");
+  const [sourced, setSourced] = useState<DiscoverResult | null>(null);
   // Once someone has picked a tab, the refresh landing must not pull it back.
   const touchedRef = useRef(false);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -60,11 +66,25 @@ export function MonitorWall() {
     setLoading(false);
 
     let cancelled = false;
-    refreshLiveness().then((next) => {
-      if (cancelled) return;
-      setStreams(next);
-      if (!touchedRef.current) setTab(initialShelf(next));
-    });
+    // Sourcing runs *after* the refresh rather than beside it. Both read the
+    // store and write it back, so in parallel whichever landed second would
+    // clobber the other's write — the refresh's fresh liveness, or the streams
+    // just discovered. Sequenced, each one reads what the last one left.
+    refreshLiveness()
+      .then((next) => {
+        if (cancelled) return;
+        setStreams(next);
+        if (!touchedRef.current) setTab(initialShelf(next));
+        setSourcing("sourcing");
+        return sourceStreams();
+      })
+      .then((found) => {
+        if (cancelled || !found) return;
+        setStreams(found.streams);
+        setSourced(found.result);
+        setSourcing("done");
+        if (!touchedRef.current) setTab(initialShelf(found.streams));
+      });
     return () => {
       cancelled = true;
     };
@@ -72,6 +92,10 @@ export function MonitorWall() {
 
   const { live, ended } = useMemo(() => partition(streams), [streams]);
   const counts: Record<Shelf, number> = { live: live.length, ended: ended.length };
+  const sourcedCount = useMemo(
+    () => streams.filter((s) => s?.sourcedAt !== undefined).length,
+    [streams],
+  );
 
   const cols = {
     2: "sm:grid-cols-1 lg:grid-cols-2",
@@ -111,8 +135,17 @@ export function MonitorWall() {
   return (
     <div>
       <AddStream onAdded={setStreams} />
+      <AutoSource
+        state={sourcing}
+        result={sourced}
+        count={sourcedCount}
+        onClear={() => setStreams(clearSourced())}
+      />
 
-      {loading ? (
+      {/* The invitation to paste something is only honest while nothing is on
+          its way. Sourcing lands a moment after mount, so showing it first
+          would flash "Nothing on the wall" at a wall about to fill itself. */}
+      {loading || (streams.length === 0 && sourcing === "sourcing") ? (
         <div className="mt-10">
           <WallSkeleton count={6} />
         </div>
@@ -286,6 +319,16 @@ function Monitor({
         {stream.viewers !== undefined && (
           <span className="font-mono text-[10px] text-muted tabular-nums">
             {compact(stream.viewers)} watching
+          </span>
+        )}
+        {/* Which of these you chose and which the site found is worth being able
+            to see — it is what the sweep and the ✕ behave differently about. */}
+        {stream.sourcedAt !== undefined && (
+          <span
+            title="Found by keyword, not added by you"
+            className="font-mono text-[9px] tracking-[0.16em] text-faint uppercase"
+          >
+            Sourced
           </span>
         )}
         <button

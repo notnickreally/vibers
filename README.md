@@ -28,6 +28,16 @@ shows thumbnails — cheap and quiet — and **Monitors** swaps every tile for a
 live muted player, so the whole wall plays at once like a gallery of screens.
 The grid runs 2, 3 or 4 across. Your wall persists in this browser.
 
+**Auto-sourcing.** The wall can also go and find streams itself. It searches
+YouTube for a list of keywords — `vibecoding live`, `using claude code` and
+friends — and puts what it finds up, but only after a second call has confirmed
+each one is *actually* on air. That second call is the point: `eventType=live` is
+a query against a search index with no freshness guarantee, and the "is it live"
+field that comes back inside those results says `live` because `live` is what you
+asked for. The video resource is the only thing that knows. A **Sourced** mark
+tells you which tiles you chose and which the site did; taking one off is
+remembered, so it doesn't come back on your next visit.
+
 **Watching.** `/watch/[videoId]` plays one stream with YouTube's control bar
 turned off, driven through the IFrame Player API with our own controls
 underneath — play/pause, mute, volume, fullscreen, and a *jump to live* button
@@ -93,6 +103,47 @@ unexplained.
 The live chat needs none of this. It rides YouTube's own frame, so it works
 with zero setup whether or not a key is set.
 
+## Auto-sourcing, and the one number it lives inside
+
+```bash
+# .env.local
+YOUTUBE_API_KEY=your-key-here
+YOUTUBE_DISCOVER_ENABLED=1
+YOUTUBE_DISCOVER_KEYWORDS=vibecoding live,using claude code
+```
+
+The API itself is free — there is no paid tier and no per-call charge. What there
+is instead is a hard allowance: **`search.list` permits 100 calls a day, per
+Google Cloud project**, resetting at midnight Pacific. Per *project*, which is to
+say per key — so production, a preview deployment and a laptop running `pnpm dev`
+all spend the same hundred while each keeps a separate cache. That is why
+discovery is off unless `YOUTUBE_DISCOVER_ENABLED` is set, and why a serious
+deployment wants its own Cloud project per environment.
+
+Three things follow from the allowance, and they are the whole architecture:
+
+- **The keyword list is the deployment's, never the browser's.** There is no `?q=`
+  on `/api/youtube/discover`. A search term arriving from outside would let any
+  visitor spend a scarce site-wide resource that costs them nothing and cannot be
+  topped up.
+- **The budget is half the allowance, and the cache TTL is derived from it**
+  rather than picked to sit beside it — `DISCOVER_TTL = 86400 × keywords / 50`.
+  Adding a keyword lengthens the interval instead of quietly overspending.
+- **Searching is cached for hours; confirming is not.** Confirmation comes from a
+  different allowance — one unit per fifty videos out of ten thousand a day — so
+  it is re-asked every minute. The candidate list goes stale, the liveness never
+  does, and a stream that ended in between is filtered out before it reaches the
+  wall.
+
+Sharing the cache across visitors is a property of a managed, single-region data
+cache, not of the framework. On a host that scales to zero with a disposable
+filesystem, each cold start pays for its own round of searches — so the route
+also keeps an in-process floor, which bounds the overspend to the number of live
+instances rather than the number of requests.
+
+Sourced streams are capped at twelve, swept after a day, and never evict a stream
+you added yourself.
+
 ## The clean picture — what's possible and what isn't
 
 The frame is just the video: `controls=0`, no annotations, no keyboard capture,
@@ -124,6 +175,8 @@ before anyone judges it.
 | `/watch/[id]` | One stream on the clean player, with title, channel, description, and the chat panel |
 | `/report` | Takedown path for a creator |
 | `/api/youtube?v=` | Metadata lookup (oEmbed, plus Data API when a key is set) |
+| `/api/youtube/status?ids=` | Batched liveness for the whole wall at once |
+| `/api/youtube/discover` | Keyword auto-sourcing — takes no input, by design |
 
 ## Architecture notes
 

@@ -7,6 +7,7 @@
  */
 
 import { clearMessages } from "./chat";
+import { type DiscoverResult, MAX_DISMISSED, mergeSourced } from "./discover";
 import { MAX_IDS } from "./youtube";
 
 export interface Stream {
@@ -30,6 +31,16 @@ export interface Stream {
   endedAt?: string;
   /** Epoch ms, stamped client-side when added. Never read during render. */
   addedAt: number;
+  /**
+   * Epoch ms, set only on a stream the site went and found by keyword.
+   *
+   * Its presence is the whole distinction between "you put this here" and "we
+   * put this here", and three behaviours hang off it: the sweep that drops
+   * sourced streams after a day, the cap that stops them taking the wall, and
+   * the dismissal that makes removing one stick. A stream you added yourself
+   * has no `sourcedAt` and is therefore subject to none of them.
+   */
+  sourcedAt?: number;
 }
 
 /** What the status route reports back for one video. */
@@ -42,6 +53,7 @@ export interface Status {
 export interface Metadata extends Omit<Stream, "addedAt"> {}
 
 const KEY = "vibers:wall";
+const DISMISSED_KEY = "vibers:wall:dismissed";
 const MAX = 60;
 
 export async function lookup(input: string): Promise<Metadata> {
@@ -70,11 +82,92 @@ export function addStream(meta: Metadata): Stream[] {
 }
 
 export function removeStream(videoId: string): Stream[] {
+  // Taking a *sourced* stream off has to be remembered, not just done. The
+  // search behind it is cached for hours, so the next visit would find the same
+  // id and put it straight back — and since the line below drops the stream's
+  // Notes with it, that loop would destroy your own writing once per visit
+  // rather than once. Manual streams need none of this: nothing re-adds them.
+  if (findStream(videoId)?.sourcedAt !== undefined) dismiss(videoId);
   // A stream's chat is stored under its own key, so taking it off the wall has
   // to take the transcript with it — otherwise the keys accumulate forever.
   clearMessages(videoId);
   const next = listStreams().filter((s) => s.videoId !== videoId);
   write(next);
+  return next;
+}
+
+/**
+ * Ids the viber has thrown off the wall, so auto-sourcing won't offer them again.
+ *
+ * A plain list rather than a set of timestamps: what matters is membership, and
+ * the cap keeps a key that only ever grows from growing forever. Oldest out
+ * first — a stream dismissed two hundred dismissals ago has almost certainly
+ * ended anyway, and if it hasn't, offering it once more is a small wrong.
+ */
+export function listDismissed(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(DISMISSED_KEY);
+    const parsed = raw ? (JSON.parse(raw) as string[]) : [];
+    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function dismiss(videoId: string): void {
+  if (typeof window === "undefined") return;
+  const next = [videoId, ...listDismissed().filter((id) => id !== videoId)].slice(
+    0,
+    MAX_DISMISSED,
+  );
+  try {
+    window.localStorage.setItem(DISMISSED_KEY, JSON.stringify(next));
+  } catch {
+    // Private browsing. The dismissal holds for this session and no longer.
+  }
+}
+
+/**
+ * Ask the site to go and find live streams, and fold what it finds into the wall.
+ *
+ * The store is re-read here rather than taken from the caller, for the same
+ * reason `refreshLiveness` re-reads before writing: the wall's other async
+ * landing is in flight at almost exactly this moment, and whichever of the two
+ * closed over an older snapshot would silently undo the other. One read, one
+ * merge, one write.
+ */
+export async function sourceStreams(): Promise<{ streams: Stream[]; result: DiscoverResult }> {
+  const empty: DiscoverResult = { keywords: [], streams: [], reason: "upstream" };
+  let result = empty;
+  try {
+    const res = await fetch("/api/youtube/discover");
+    if (res.ok) result = (await res.json()) as DiscoverResult;
+  } catch {
+    // Offline, or the route is down. The wall keeps what it already has.
+  }
+
+  const next = mergeSourced(listStreams(), result.streams ?? [], listDismissed(), Date.now()).slice(
+    0,
+    MAX,
+  );
+  write(next);
+  return { streams: next, result };
+}
+
+/**
+ * Take every sourced stream off at once, and remember each one.
+ *
+ * The sweep in `mergeSourced` does this on its own after a day; this is for
+ * wanting your own wall back before then. It goes through `removeStream` per
+ * id rather than filtering in one pass, because each one still has a Notes
+ * transcript to clear and a dismissal to record.
+ */
+export function clearSourced(): Stream[] {
+  let next = listStreams();
+  for (const stream of next.filter((s) => s.sourcedAt !== undefined)) {
+    next = removeStream(stream.videoId);
+  }
   return next;
 }
 
