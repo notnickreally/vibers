@@ -88,9 +88,15 @@ async function search(keyword: string, key: string): Promise<{ ids: string[]; qu
     // anything else is a tile that would never come up.
     videoEmbeddable: "true",
     videoSyndicated: "true",
-    // Stricter than the default, because this is the one surface where video
-    // nobody chose autoplays on arrival.
-    safeSearch: "strict",
+    // Filtered, because this is the one surface where video nobody chose
+    // autoplays on arrival — but `moderate`, not `strict`. Measured against the
+    // live API on 2026-07-28: `strict` returns **zero** results for "live
+    // coding" where `moderate` returns a full page of them, and the same holds
+    // across the seed keywords. Whatever `strict` demands, a livestream
+    // essentially never carries it, so it does not read as a stricter filter
+    // here — it reads as the feature being switched off. `moderate` is
+    // YouTube's own default and is still a filter.
+    safeSearch: "moderate",
     relevanceLanguage: "en",
     key,
   });
