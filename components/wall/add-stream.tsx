@@ -1,12 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { addStream, lookup, type Metadata, type Stream } from "@/lib/stream";
+import { addStream, type Metadata, type Stream } from "@/lib/stream";
 import { parseYouTube } from "@/lib/youtube";
 
 /**
  * Paste a URL, get the real thing. The title, channel and thumbnail are pulled
  * from YouTube — nothing is typed in by hand, so nothing can be misattributed.
+ *
+ * One call rather than two now: the wall's route does the lookup itself, on
+ * the server, because what lands here goes on everyone's wall.
  */
 export function AddStream({ onAdded }: { onAdded: (streams: Stream[]) => void }) {
   const [url, setUrl] = useState("");
@@ -27,9 +30,9 @@ export function AddStream({ onAdded }: { onAdded: (streams: Stream[]) => void })
     setError("");
     setFound(null);
     try {
-      const meta = await lookup(parsed.id);
-      onAdded(addStream(meta));
-      setFound(meta);
+      const { streams, added } = await addStream(parsed.id);
+      onAdded(streams);
+      setFound(added);
       setUrl("");
       setState("idle");
     } catch (err) {

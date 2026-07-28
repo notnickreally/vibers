@@ -15,8 +15,8 @@ export default function HomePage() {
           it holds is deliberately not live. */}
       <SectionHead
         slate="The wall"
-        title="Your wall"
-        meta="Your streams, kept in this browser"
+        title="The wall"
+        meta="One shared wall — everything anyone puts up"
       />
       <MonitorWall />
     </div>

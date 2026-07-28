@@ -2,13 +2,28 @@
  * The wall's contents. Every field here comes from YouTube — nothing on
  * vibers.tv is invented about a stream or its creator.
  *
- * There is no database yet, so the wall lives in localStorage: it's yours, it
- * persists across visits, and it does not sync between devices.
+ * The wall is **shared**. It lives in a Neon Postgres database behind
+ * `app/api/streams`, so a stream anyone puts up is on the wall for everyone,
+ * on every device, and it is still there tomorrow. It used to live in each
+ * browser's localStorage, which made "your wall" literally true and "the wall"
+ * impossible — two people on the same site saw two different walls.
+ *
+ * This module is now two halves that no longer share a mechanism:
+ *
+ * - **The deciding** — `shelf`, `partition`, `cardState`, `mergeStatuses` and
+ *   friends. Pure, total over a `Stream`, and unchanged by the move; they run
+ *   in the browser and on the server, and they are what the suite pins.
+ * - **The asking** — `listStreams` and the calls below it. Every one is a
+ *   `fetch` at the wall's routes, and every one is async. There is no local
+ *   path and no cache to fall back to: if the database can't be reached the
+ *   call throws and the wall says so, because silently showing someone an
+ *   empty or private wall is the bug this replaced.
+ *
+ * The writing itself lives in `lib/wall.ts`, server-side.
  */
 
 import { clearMessages } from "./chat";
-import { type DiscoverResult, MAX_DISMISSED, mergeSourced } from "./discover";
-import { MAX_IDS } from "./youtube";
+import type { DiscoverResult } from "./discover";
 
 export interface Stream {
   videoId: string;
@@ -29,7 +44,7 @@ export interface Stream {
    * once a broadcast, so its presence *is* the distinction.
    */
   endedAt?: string;
-  /** Epoch ms, stamped client-side when added. Never read during render. */
+  /** Epoch ms, stamped server-side when added. Never read during render. */
   addedAt: number;
   /**
    * Epoch ms, set only on a stream the site went and found by keyword.
@@ -52,136 +67,96 @@ export interface Status {
 
 export interface Metadata extends Omit<Stream, "addedAt"> {}
 
-const KEY = "vibers:wall";
-const DISMISSED_KEY = "vibers:wall:dismissed";
-const MAX = 60;
+/**
+ * Ask the wall's routes. Every one of these throws rather than degrading.
+ *
+ * A shared wall has exactly one honest failure mode: say so. Returning an
+ * empty array on a 503 would render "Nothing on the wall" over a wall that is
+ * full, and returning a stale local copy would put the per-browser wall back
+ * under a coat of paint. So the error travels, and `MonitorWall` shows it.
+ */
+async function ask<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, init);
+  const data = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
+  if (!res.ok || !data) throw new Error(data?.error ?? "The wall isn't answering.");
+  return data;
+}
 
 export async function lookup(input: string): Promise<Metadata> {
-  const res = await fetch(`/api/youtube?v=${encodeURIComponent(input)}`);
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error ?? "Lookup failed.");
-  return data as Metadata;
+  return ask<Metadata>(`/api/youtube?v=${encodeURIComponent(input)}`);
 }
 
-export function listStreams(): Stream[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(KEY);
-    const parsed = raw ? (JSON.parse(raw) as Stream[]) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-export function addStream(meta: Metadata): Stream[] {
-  const stream: Stream = { ...meta, addedAt: Date.now() };
-  const next = [stream, ...listStreams().filter((s) => s.videoId !== meta.videoId)].slice(0, MAX);
-  write(next);
-  return next;
-}
-
-export function removeStream(videoId: string): Stream[] {
-  // Taking a *sourced* stream off has to be remembered, not just done. The
-  // search behind it is cached for hours, so the next visit would find the same
-  // id and put it straight back — and since the line below drops the stream's
-  // Notes with it, that loop would destroy your own writing once per visit
-  // rather than once. Manual streams need none of this: nothing re-adds them.
-  if (findStream(videoId)?.sourcedAt !== undefined) dismiss(videoId);
-  // A stream's chat is stored under its own key, so taking it off the wall has
-  // to take the transcript with it — otherwise the keys accumulate forever.
-  clearMessages(videoId);
-  const next = listStreams().filter((s) => s.videoId !== videoId);
-  write(next);
-  return next;
+export async function listStreams(): Promise<Stream[]> {
+  return (await ask<{ streams: Stream[] }>("/api/streams")).streams;
 }
 
 /**
- * Ids the viber has thrown off the wall, so auto-sourcing won't offer them again.
+ * Put a stream up, by id.
  *
- * A plain list rather than a set of timestamps: what matters is membership, and
- * the cap keeps a key that only ever grows from growing forever. Oldest out
- * first — a stream dismissed two hundred dismissals ago has almost certainly
- * ended anyway, and if it hasn't, offering it once more is a small wrong.
+ * The id and nothing else: the route looks the video up itself. On a wall
+ * everyone can see, a title and a thumbnail posted by the client would be
+ * arbitrary text and an arbitrary `img src` on everyone's screen — see the
+ * note in `lib/lookup.ts`.
  */
-export function listDismissed(): string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(DISMISSED_KEY);
-    const parsed = raw ? (JSON.parse(raw) as string[]) : [];
-    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
-  } catch {
-    return [];
-  }
+export async function addStream(
+  videoId: string,
+): Promise<{ streams: Stream[]; added: Metadata }> {
+  return ask<{ streams: Stream[]; added: Metadata }>("/api/streams", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ v: videoId }),
+  });
 }
 
-function dismiss(videoId: string): void {
-  if (typeof window === "undefined") return;
-  const next = [videoId, ...listDismissed().filter((id) => id !== videoId)].slice(
-    0,
-    MAX_DISMISSED,
-  );
-  try {
-    window.localStorage.setItem(DISMISSED_KEY, JSON.stringify(next));
-  } catch {
-    // Private browsing. The dismissal holds for this session and no longer.
-  }
+/**
+ * Take a stream off — for everyone. That is what a shared wall means.
+ *
+ * The dismissal that stops auto-sourcing putting a sourced stream straight
+ * back is recorded server-side now, since the search behind it is shared too.
+ * The Notes transcript is not: it is written by one person, in one browser,
+ * and stays there, so clearing it stays here.
+ */
+export async function removeStream(videoId: string): Promise<Stream[]> {
+  clearMessages(videoId);
+  const data = await ask<{ streams: Stream[] }>(`/api/streams?v=${encodeURIComponent(videoId)}`, {
+    method: "DELETE",
+  });
+  return data.streams;
 }
 
 /**
  * Ask the site to go and find live streams, and fold what it finds into the wall.
  *
- * The store is re-read here rather than taken from the caller, for the same
- * reason `refreshLiveness` re-reads before writing: the wall's other async
- * landing is in flight at almost exactly this moment, and whichever of the two
- * closed over an older snapshot would silently undo the other. One read, one
- * merge, one write.
+ * Read, merge and write all happen inside the route against one row set —
+ * which is the lost-update problem this used to have, gone. Two tabs doing
+ * this at once used to each read the store, merge into their own snapshot and
+ * write it back, so whichever landed second silently undid the other.
  */
 export async function sourceStreams(): Promise<{ streams: Stream[]; result: DiscoverResult }> {
-  const empty: DiscoverResult = { keywords: [], streams: [], reason: "upstream" };
-  let result = empty;
-  try {
-    const res = await fetch("/api/youtube/discover");
-    if (res.ok) result = (await res.json()) as DiscoverResult;
-  } catch {
-    // Offline, or the route is down. The wall keeps what it already has.
-  }
-
-  const next = mergeSourced(listStreams(), result.streams ?? [], listDismissed(), Date.now()).slice(
-    0,
-    MAX,
-  );
-  write(next);
-  return { streams: next, result };
+  return ask<{ streams: Stream[]; result: DiscoverResult }>("/api/streams/source", {
+    method: "POST",
+  });
 }
 
-/**
- * Take every sourced stream off at once, and remember each one.
- *
- * The sweep in `mergeSourced` does this on its own after a day; this is for
- * wanting your own wall back before then. It goes through `removeStream` per
- * id rather than filtering in one pass, because each one still has a Notes
- * transcript to clear and a dismissal to record.
- */
-export function clearSourced(): Stream[] {
-  let next = listStreams();
-  for (const stream of next.filter((s) => s.sourcedAt !== undefined)) {
-    next = removeStream(stream.videoId);
-  }
-  return next;
+/** Take every sourced stream off at once — again, for everyone — and remember each one. */
+export async function clearSourced(): Promise<Stream[]> {
+  const data = await ask<{ streams: Stream[] }>("/api/streams?sourced=1", { method: "DELETE" });
+  return data.streams;
 }
 
-export function findStream(videoId: string): Stream | undefined {
-  return listStreams().find((s) => s.videoId === videoId);
+export async function findStream(videoId: string): Promise<Stream | undefined> {
+  return (await listStreams()).find((s) => s.videoId === videoId);
 }
 
 /* ---------------------------------------------------------------------------
    Which shelf a stream sits on.
 
-   Pure, and deliberately so: the wall's store reads `window.localStorage`
-   directly, so nothing in it survives the node environment the test suite runs
-   in. These take a stream and return an answer, which is the half worth
-   pinning — same shape as `pictureCover` in `player-time.ts`.
+   Pure, and deliberately so: the wall's store is a set of `fetch` calls at
+   routes that talk to Postgres, none of which the node environment the suite
+   runs in can stand up. These take a stream and return an answer, which is the
+   half worth pinning — same shape as `pictureCover` in `player-time.ts`.
+   `mergeStatuses` and `mergeSourced` being pure is also what lets the server
+   apply them: the rules the suite pins are the rules the database gets.
 --------------------------------------------------------------------------- */
 
 export type Shelf = "live" | "ended";
@@ -298,44 +273,17 @@ export function mergeStatuses(streams: Stream[], statuses: Record<string, Status
  * Re-ask YouTube what is still on air, and write the answer back.
  *
  * Without this the wall never moves: `isLive` is stamped once when a stream is
- * added and then believed forever, so a stream that ends while it sits on your
- * wall stays in the Live tab until you take it down and put it back.
+ * added and then believed forever, so a stream that ends while it sits up
+ * stays in the Live tab until someone takes it down and puts it back.
  *
- * The wall holds more streams than `videos.list` takes ids, so this goes in
- * chunks — two calls at the very top end, one unit each against a daily
- * allowance of ten thousand. The store is re-read at write time rather than
- * reused from the top of the function, so anything added or removed while the
- * requests were out survives them.
+ * The batching that used to happen here now happens in the route, and that is
+ * a saving rather than a relocation: one refresh serves everybody, instead of
+ * every visitor spending their own calls asking the same question about the
+ * same sixty ids.
  */
 export async function refreshLiveness(): Promise<Stream[]> {
-  const ids = listStreams().map((s) => s.videoId);
-  if (ids.length === 0) return [];
-
-  const statuses: Record<string, Status> = {};
-  for (let i = 0; i < ids.length; i += MAX_IDS) {
-    const chunk = ids.slice(i, i + MAX_IDS);
-    try {
-      const res = await fetch(`/api/youtube/status?ids=${chunk.join(",")}`);
-      if (!res.ok) continue;
-      const data = (await res.json()) as { statuses?: Record<string, Status> };
-      Object.assign(statuses, data.statuses ?? {});
-    } catch {
-      // Offline, or the route is down. The wall keeps what it already knows.
-    }
-  }
-
-  const next = mergeStatuses(listStreams(), statuses);
-  write(next);
-  return next;
-}
-
-function write(streams: Stream[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(KEY, JSON.stringify(streams));
-  } catch {
-    // Private browsing — the wall just won't survive the session.
-  }
+  const data = await ask<{ streams: Stream[] }>("/api/streams/refresh", { method: "POST" });
+  return data.streams;
 }
 
 export const RIGHTS_CONTACT = "rights@vibers.tv";
