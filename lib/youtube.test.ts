@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  chunk,
+  isLive,
   isVideoId,
   liveChatPopoutUrl,
   liveChatSignInUrl,
@@ -226,5 +228,75 @@ describe("safeHttpUrl", () => {
     expect(safeHttpUrl(undefined)).toBeNull();
     expect(safeHttpUrl("")).toBeNull();
     expect(safeHttpUrl("not a url")).toBeNull();
+  });
+});
+
+describe("chunk", () => {
+  // The shape that matters: confirming a hundred candidates is two calls, not a
+  // hundred. One request per candidate is the N+1 this exists to make impossible.
+  it("splits a candidate set into batches videos.list will take", () => {
+    const ids = Array.from({ length: 100 }, (_, i) => `id${i}`);
+    const batches = chunk(ids, MAX_IDS);
+    expect(batches).toHaveLength(2);
+    expect(batches[0]).toHaveLength(50);
+    expect(batches[1]).toHaveLength(50);
+  });
+
+  it("leaves a short set in one batch", () => {
+    expect(chunk(["a", "b"], MAX_IDS)).toEqual([["a", "b"]]);
+    expect(chunk(Array.from({ length: 51 }, (_, i) => i), MAX_IDS)[1]).toHaveLength(1);
+  });
+
+  it("is total over nothing to batch", () => {
+    expect(chunk([], MAX_IDS)).toEqual([]);
+    expect(chunk(undefined as unknown as string[], MAX_IDS)).toEqual([]);
+    // A size that would loop forever answers with nothing instead.
+    expect(chunk(["a"], 0)).toEqual([]);
+    expect(chunk(["a"], -1)).toEqual([]);
+  });
+});
+
+describe("isLive", () => {
+  const started = "2026-07-28T09:00:00Z";
+
+  it("says yes only to a broadcast that started and has not ended", () => {
+    expect(
+      isLive({
+        snippet: { liveBroadcastContent: "live" },
+        liveStreamingDetails: { actualStartTime: started },
+      }),
+    ).toBe(true);
+  });
+
+  it("says no to a broadcast that finished", () => {
+    expect(
+      isLive({
+        snippet: { liveBroadcastContent: "live" },
+        liveStreamingDetails: { actualStartTime: started, actualEndTime: "2026-07-28T11:00:00Z" },
+      }),
+    ).toBe(false);
+  });
+
+  // A premiere scheduled for tomorrow is not live, and the field that says so
+  // is the missing start time — `actualStartTime` is absent until it begins.
+  it("says no to a broadcast that has not started", () => {
+    expect(
+      isLive({
+        snippet: { liveBroadcastContent: "upcoming" },
+        liveStreamingDetails: {},
+      }),
+    ).toBe(false);
+  });
+
+  // YouTube only carries liveStreamingDetails for something that was once a
+  // broadcast, so its absence is what separates a plain video from a stream.
+  it("says no to a video that was never a broadcast", () => {
+    expect(isLive({ snippet: { liveBroadcastContent: "none" } })).toBe(false);
+  });
+
+  it("is total over junk", () => {
+    for (const junk of [undefined, null, {}, { snippet: 3 }, { liveStreamingDetails: "x" }, []]) {
+      expect(isLive(junk as never)).toBe(false);
+    }
   });
 });

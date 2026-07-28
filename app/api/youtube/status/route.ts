@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { parseIds } from "@/lib/youtube";
+import { isLive, parseIds } from "@/lib/youtube";
 
 /**
  * Is it still on air? — for the whole wall at once.
@@ -49,7 +49,11 @@ export async function GET(request: Request) {
       items?: {
         id?: string;
         snippet?: { liveBroadcastContent?: string };
-        liveStreamingDetails?: { concurrentViewers?: string; actualEndTime?: string };
+        liveStreamingDetails?: {
+          concurrentViewers?: string;
+          actualStartTime?: string;
+          actualEndTime?: string;
+        };
       }[];
     };
 
@@ -57,11 +61,13 @@ export async function GET(request: Request) {
     for (const item of data.items ?? []) {
       if (!item.id) continue;
       const endedAt = item.liveStreamingDetails?.actualEndTime;
-      const isLive = item.snippet?.liveBroadcastContent === "live" && !endedAt;
+      // The shared predicate, so a stream auto-sourcing confirmed live a moment
+      // ago cannot be re-judged here by a different rule.
+      const live = isLive(item);
       const viewers = item.liveStreamingDetails?.concurrentViewers;
       statuses[item.id] = {
-        isLive,
-        viewers: isLive && viewers ? Number(viewers) : undefined,
+        isLive: live,
+        viewers: live && viewers ? Number(viewers) : undefined,
         endedAt,
       };
     }
