@@ -13,11 +13,14 @@ import {
 
 /**
  * Only the pure half of the store is exercised here. `listStreams` and friends
- * reach for `window.localStorage` directly and short-circuit when there is no
- * `window`, so under vitest's default node environment they can only ever
- * report the SSR path — there is no seam to inject a `MemoryStorage` through,
- * the way `chat.ts` has one. What is worth pinning is the deciding, and all of
- * that is total functions over a `Stream`.
+ * are `fetch` calls at routes that talk to Postgres, and vitest's default node
+ * environment can stand up neither — there is no seam to inject a fake through,
+ * the way `chat.ts` has one for storage. What is worth pinning is the deciding,
+ * and all of that is total functions over a `Stream`.
+ *
+ * That split is load-bearing now rather than incidental: `mergeStatuses` and
+ * `mergeSourced` are applied by the *server*, in `lib/wall.ts`, before anything
+ * is written. So the rules pinned here are the rules the database gets.
  */
 
 function stream(over: Partial<Stream> = {}): Stream {

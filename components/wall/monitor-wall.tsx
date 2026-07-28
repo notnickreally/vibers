@@ -40,6 +40,13 @@ import {
  * that ended three weeks ago stops taking up a monitor. Liveness is re-asked
  * on load — `isLive` is stamped when a stream is added, and believing that
  * forever is how a finished stream stays on the Live tab for good.
+ *
+ * The wall is one wall, shared: everything below reads and writes the streams
+ * table in Neon through `/api/streams`, so what is on screen is what everyone
+ * else is looking at. That makes the store fallible in a way a localStorage
+ * one never was, so there is a failure path — and it is a message, never a
+ * fallback. An empty grid where a full wall should be is a lie that looks
+ * exactly like the truth.
  */
 
 type Size = 2 | 3 | 4;
@@ -55,35 +62,50 @@ export function MonitorWall() {
   const [tab, setTab] = useState<Shelf>("live");
   const [sourcing, setSourcing] = useState<"idle" | "sourcing" | "done">("idle");
   const [sourced, setSourced] = useState<DiscoverResult | null>(null);
+  const [error, setError] = useState("");
   // Once someone has picked a tab, the refresh landing must not pull it back.
   const touchedRef = useRef(false);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => {
-    const stored = listStreams();
-    setStreams(stored);
-    setTab(initialShelf(stored));
-    setLoading(false);
-
     let cancelled = false;
-    // Sourcing runs *after* the refresh rather than beside it. Both read the
-    // store and write it back, so in parallel whichever landed second would
-    // clobber the other's write — the refresh's fresh liveness, or the streams
-    // just discovered. Sequenced, each one reads what the last one left.
-    refreshLiveness()
+
+    function land(next: Stream[]) {
+      if (cancelled) return;
+      setStreams(next);
+      if (!touchedRef.current) setTab(initialShelf(next));
+    }
+
+    // Three sequential calls, and the order is the same one the browser store
+    // needed: what is on the wall, then what is still on air, then what else
+    // we can find. Sourcing runs *after* the refresh rather than beside it
+    // because both write the same rows, and a refresh landing on top of a
+    // sourcing run would judge streams it hasn't seen.
+    listStreams()
+      .then((stored) => {
+        land(stored);
+        if (!cancelled) setLoading(false);
+        return refreshLiveness();
+      })
       .then((next) => {
         if (cancelled) return;
-        setStreams(next);
-        if (!touchedRef.current) setTab(initialShelf(next));
+        land(next);
         setSourcing("sourcing");
         return sourceStreams();
       })
       .then((found) => {
         if (cancelled || !found) return;
-        setStreams(found.streams);
+        land(found.streams);
         setSourced(found.result);
         setSourcing("done");
-        if (!touchedRef.current) setTab(initialShelf(found.streams));
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // Said, never swallowed. The wall is remote now, and a wall that can't
+        // be reached has to look different from a wall with nothing on it.
+        setError(err instanceof Error ? err.message : "The wall isn't answering.");
+        setSourcing("idle");
+        setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -106,6 +128,17 @@ export function MonitorWall() {
   const selectTab = useCallback((next: Shelf) => {
     touchedRef.current = true;
     setTab(next);
+  }, []);
+
+  // Every write goes through here so a failed one reports itself rather than
+  // leaving the grid showing a change that never reached the database.
+  const write = useCallback(async (action: () => Promise<Stream[]>) => {
+    try {
+      setStreams(await action());
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The wall isn't answering.");
+    }
   }, []);
 
   // Arrow keys move between tabs, Home/End jump to the ends — the half of the
@@ -139,13 +172,23 @@ export function MonitorWall() {
         state={sourcing}
         result={sourced}
         count={sourcedCount}
-        onClear={() => setStreams(clearSourced())}
+        onClear={() => write(clearSourced)}
       />
+
+      {error && (
+        <p
+          role="alert"
+          className="mt-4 border border-del/50 bg-del/8 p-4 font-mono text-[11px] leading-relaxed text-del sm:p-5"
+        >
+          {error}
+        </p>
+      )}
 
       {/* The invitation to paste something is only honest while nothing is on
           its way. Sourcing lands a moment after mount, so showing it first
           would flash "Nothing on the wall" at a wall about to fill itself. */}
-      {loading || (streams.length === 0 && sourcing === "sourcing") ? (
+      {error && streams.length === 0 ? null : loading ||
+        (streams.length === 0 && sourcing === "sourcing") ? (
         <div className="mt-10">
           <WallSkeleton count={6} />
         </div>
@@ -154,7 +197,7 @@ export function MonitorWall() {
           <EmptyState
             slate="Nothing on the wall"
             title="Put a stream up"
-            body="Paste the URL of a YouTube live stream above. It gets its real title and channel from YouTube and stays on your wall until you take it down."
+            body="Paste the URL of a YouTube live stream above. It gets its real title and channel from YouTube, and it goes up for everyone — this is one wall, and it stays as it is until someone takes it down."
           />
         </div>
       ) : (
@@ -264,7 +307,7 @@ export function MonitorWall() {
                           key={s.videoId}
                           stream={s}
                           mode={mode}
-                          onRemove={() => setStreams(removeStream(s.videoId))}
+                          onRemove={() => write(() => removeStream(s.videoId))}
                         />
                       ))}
                     </div>

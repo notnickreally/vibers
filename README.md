@@ -1,8 +1,9 @@
 # vibers.tv
 
-A wall of live coding streams. Paste a YouTube URL, it joins your wall with its
+A wall of live coding streams. Paste a YouTube URL, it joins the wall with its
 real title and channel, and you can watch the whole wall at once or open one
-stream on a clean player.
+stream on a clean player. One wall, shared by everyone — what you put up is
+what the next visitor sees.
 
 ```bash
 pnpm install
@@ -26,7 +27,9 @@ monitor wall. Liveness is re-asked once on load, batched fifty ids to a call,
 so a stream that ends while it is up actually moves. Within a tab, **Posters**
 shows thumbnails — cheap and quiet — and **Monitors** swaps every tile for a
 live muted player, so the whole wall plays at once like a gallery of screens.
-The grid runs 2, 3 or 4 across. Your wall persists in this browser.
+The grid runs 2, 3 or 4 across. The wall lives in Postgres, so it is the same
+wall on every device and it is still there tomorrow — and taking a stream off
+takes it off for everyone, which is the other half of what shared means.
 
 **Auto-sourcing.** The wall can also go and find streams itself. It searches
 YouTube for a list of keywords — `vibecoding live`, `using claude code` and
@@ -177,14 +180,25 @@ before anyone judges it.
 | `/api/youtube?v=` | Metadata lookup (oEmbed, plus Data API when a key is set) |
 | `/api/youtube/status?ids=` | Batched liveness for the whole wall at once |
 | `/api/youtube/discover` | Keyword auto-sourcing — takes no input, by design |
+| `/api/streams` | The shared wall: `GET` it, `POST {v}` to put one up, `DELETE ?v=` / `?sourced=1` to take one off |
+| `/api/streams/refresh` | Re-asks liveness for the whole wall and writes it back |
+| `/api/streams/source` | Runs discovery and folds what it finds into the wall |
 
 ## Architecture notes
 
 - **Next.js 16 App Router**, React 19, Tailwind CSS v4, TypeScript.
-- `lib/stream.ts` is the store — plain localStorage, no backend yet. That's the
-  one real limitation: a wall doesn't sync between devices or browsers. Swapping
-  it for a database is a contained change, since every read goes through that
-  module.
+- **The wall is one shared wall, in Neon Postgres.** `lib/wall.ts` is the store
+  and runs server-side; `lib/db.ts` holds the connection and creates the two
+  tables on first use, so a fresh Neon branch needs no migration step. The
+  browser reaches all of it through `app/api/streams`, and `lib/stream.ts` is
+  now two halves: pure functions that decide (`shelf`, `partition`,
+  `mergeStatuses`, `mergeSourced`), and async `fetch` calls that ask. There is
+  no local fallback — if the database can't be reached the wall says so rather
+  than rendering an empty grid that looks exactly like an empty wall.
+- **Streams go up by id.** `POST /api/streams` takes a YouTube id or URL and
+  nothing else, and looks the video up itself. A client-supplied title would be
+  arbitrary text and a client-supplied thumbnail an arbitrary `img src`, on
+  everyone's wall, from anyone who can reach the route.
 - `lib/youtube.ts` parses URLs and builds embed URLs; `components/player/`
   wraps the IFrame Player API; `components/wall/` is the wall and watch view.
 - No `Math.random()` or `Date.now()` during render, so server and client always
@@ -197,8 +211,25 @@ teal for links out. **Tally red is reserved for one thing: a stream YouTube
 confirmed is live right now** — nothing else uses it. Type is Bricolage
 Grotesque, Instrument Sans and JetBrains Mono.
 
+## The database
+
+The wall needs one environment variable:
+
+```bash
+# .env.local
+DATABASE_URL=postgres://…
+```
+
+Neon, provisioned through the Vercel Marketplace — the integration sets
+`DATABASE_URL` on the project itself, so a deployment needs no further setup.
+The two tables (`streams`, `dismissed_streams`) are created on first use, which
+means every preview deployment's own Neon branch works without a migration
+step. There is no local database and no local fallback: without `DATABASE_URL`
+the wall's routes answer 503 and the page says so.
+
 ## Not built yet
 
-Accounts and a shared/public wall. Both need a backend. So does a chat of our own — the live chat you see is YouTube's,
-rendered by YouTube; the notes tab is the local stand-in for the half that
-would be ours.
+Accounts. The wall is shared but anonymous — anyone can put a stream up and
+anyone can take one down, and nothing records who did which. So is a chat of
+our own: the live chat you see is YouTube's, rendered by YouTube, and the notes
+tab is a local, per-browser stand-in for the half that would be ours.

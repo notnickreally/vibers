@@ -6,7 +6,7 @@ import { LiveChat } from "@/components/chat/live-chat";
 import { CleanPlayer } from "@/components/player/clean-player";
 import { ErrorState } from "@/components/states";
 import { compact } from "@/lib/format";
-import { addStream, findStream, listStreams, lookup, type Stream } from "@/lib/stream";
+import { addStream, listStreams, lookup, type Stream } from "@/lib/stream";
 import { safeHttpUrl } from "@/lib/youtube";
 
 /**
@@ -21,14 +21,26 @@ export function WatchView({ videoId }: { videoId: string }) {
   const [onWall, setOnWall] = useState(false);
 
   useEffect(() => {
-    const cached = findStream(videoId);
-    if (cached) {
-      setStream(cached);
-      setOnWall(true);
-    }
-    setOthers(listStreams().filter((s) => s.videoId !== videoId));
-
     let cancelled = false;
+    let cached: Stream | undefined;
+
+    // The wall is remote, so what used to be a synchronous read of the local
+    // store is a request now. It runs beside the lookup rather than before it:
+    // the two answer different questions, and the picture should not wait on
+    // the sidebar. A wall that won't load leaves the sidebar empty and the
+    // player alone — this page's job is the one stream.
+    listStreams()
+      .then((wall) => {
+        if (cancelled) return;
+        cached = wall.find((s) => s.videoId === videoId);
+        if (cached) {
+          setStream((current) => current ?? cached ?? null);
+          setOnWall(true);
+        }
+        setOthers(wall.filter((s) => s.videoId !== videoId));
+      })
+      .catch(() => {});
+
     lookup(videoId)
       .then((meta) => {
         if (cancelled) return;
@@ -43,9 +55,9 @@ export function WatchView({ videoId }: { videoId: string }) {
     };
   }, [videoId]);
 
-  // Only ever an http(s) link. A stream can come back from localStorage, which
-  // is the reader's own to edit, so what lands in the href is not necessarily
-  // the channel URL oEmbed handed us.
+  // Only ever an http(s) link. A stream's channel URL travels through the wall
+  // and back out of Postgres, so what lands in the href is not necessarily the
+  // URL oEmbed handed us.
   const channelUrl = safeHttpUrl(stream?.channelUrl);
 
   if (error) {
@@ -123,13 +135,14 @@ export function WatchView({ videoId }: { videoId: string }) {
                 type="button"
                 onClick={() => {
                   if (onWall) return;
-                  addStream(stream);
-                  setOnWall(true);
+                  addStream(videoId)
+                    .then(() => setOnWall(true))
+                    .catch(() => {});
                 }}
                 disabled={onWall}
                 className="border border-edge px-3 py-1.5 font-mono text-[10px] tracking-[0.1em] uppercase transition-colors disabled:text-faint enabled:text-bone enabled:hover:border-amber enabled:hover:text-amber"
               >
-                {onWall ? "On your wall" : "Add to wall"}
+                {onWall ? "On the wall" : "Add to wall"}
               </button>
             )}
           </div>
@@ -177,7 +190,7 @@ export function WatchView({ videoId }: { videoId: string }) {
 
       {/* The rest of the wall, so you can hop between streams. */}
       <aside className="min-w-0">
-        <p className="eyebrow mb-3">Also on your wall</p>
+        <p className="eyebrow mb-3">Also on the wall</p>
         {others.length === 0 ? (
           <p className="border border-dashed border-edge p-4 font-mono text-[11px] leading-relaxed text-faint">
             Nothing else up yet. Add more streams and they&apos;ll queue here.
