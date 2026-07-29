@@ -3,18 +3,14 @@
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AddStream } from "@/components/wall/add-stream";
-import { AutoSource } from "@/components/wall/auto-source";
 import { EmptyState, WallSkeleton } from "@/components/states";
 import { LiveBadge } from "@/components/ui/bits";
-import type { DiscoverResult } from "@/lib/discover";
-import type { WatchlistResult } from "@/lib/watch";
 import { compact } from "@/lib/format";
 import { YT_CHROME_MS } from "@/lib/player-time";
 import { embedFor, parseKey, watchHref } from "@/lib/source";
 import { safeHttpUrl } from "@/lib/youtube";
 import {
   cardState,
-  clearSourced,
   DEFAULT_MODE,
   DEFAULT_VIEW,
   listStreams,
@@ -76,9 +72,10 @@ export function MonitorWall() {
   const [mode, setMode] = useState<Mode>(DEFAULT_MODE);
   const [size, setSize] = useState<Size>(3);
   const [view, setView] = useState<WallView>(DEFAULT_VIEW);
-  const [sourcing, setSourcing] = useState<"idle" | "sourcing" | "done">("idle");
-  const [sourced, setSourced] = useState<DiscoverResult | null>(null);
-  const [watchlist, setWatchlist] = useState<WatchlistResult | null>(null);
+  // Sourcing still runs; it just isn't narrated any more. What is left of it
+  // here is the one bit the wall itself needs: whether a run is still in
+  // flight, so an empty wall waits on a skeleton instead of saying it is empty.
+  const [sourcing, setSourcing] = useState(false);
   const [error, setError] = useState("");
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -109,22 +106,20 @@ export function MonitorWall() {
       .then((next) => {
         if (cancelled) return;
         land(next);
-        setSourcing("sourcing");
+        setSourcing(true);
         return sourceStreams();
       })
       .then((found) => {
         if (cancelled || !found) return;
         land(found.streams);
-        setSourced(found.result);
-        setWatchlist(found.watchlist);
-        setSourcing("done");
+        setSourcing(false);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         // Said, never swallowed. The wall is remote now, and a wall that can't
         // be reached has to look different from a wall with nothing on it.
         setError(err instanceof Error ? err.message : "The wall isn't answering.");
-        setSourcing("idle");
+        setSourcing(false);
         setLoading(false);
       });
     return () => {
@@ -139,11 +134,6 @@ export function MonitorWall() {
     live: live.length,
     ended: ended.length,
   };
-  const sourcedCount = useMemo(
-    () => streams.filter((s) => s?.sourcedAt !== undefined).length,
-    [streams],
-  );
-
   const cols = {
     2: "sm:grid-cols-1 lg:grid-cols-2",
     3: "sm:grid-cols-2 lg:grid-cols-3",
@@ -188,13 +178,6 @@ export function MonitorWall() {
   return (
     <div>
       <AddStream onAdded={setStreams} />
-      <AutoSource
-        state={sourcing}
-        result={sourced}
-        watchlist={watchlist}
-        count={sourcedCount}
-        onClear={() => write(clearSourced)}
-      />
 
       {error && (
         <p
@@ -208,8 +191,7 @@ export function MonitorWall() {
       {/* The invitation to paste something is only honest while nothing is on
           its way. Sourcing lands a moment after mount, so showing it first
           would flash "Nothing on the wall" at a wall about to fill itself. */}
-      {error && streams.length === 0 ? null : loading ||
-        (streams.length === 0 && sourcing === "sourcing") ? (
+      {error && streams.length === 0 ? null : loading || (streams.length === 0 && sourcing) ? (
         <div className="mt-10">
           <WallSkeleton count={6} />
         </div>
