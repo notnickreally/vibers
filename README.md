@@ -230,6 +230,13 @@ before anyone judges it.
 | `/api/streams` | The shared wall: `GET` it, `POST {v}` to put one up, `DELETE ?v=` / `?sourced=1` to take one off |
 | `/api/streams/refresh` | Re-asks liveness for the whole wall and writes it back |
 | `/api/streams/source` | Runs discovery and folds what it finds into the wall |
+| `/admin` | The panel — the wall with moderation, and which environment variables are set |
+| `/admin/login` | The gate: the Slate, the Patch Bay, the Vectorscope |
+| `/admin/signup` | Make an operator account, using the deployment's signup password |
+| `/api/admin/login` | One layer at a time. `POST {layer, …}`; progress rides a signed stage cookie |
+| `/api/admin/signup` | `GET` how many seats are left, `POST` to take one |
+| `/api/admin/logout` | Clears both cookies |
+| `/api/admin/streams` | The same three wall actions, behind the gate |
 
 ## Architecture notes
 
@@ -277,14 +284,55 @@ DATABASE_URL=postgres://…
 
 Neon, provisioned through the Vercel Marketplace — the integration sets
 `DATABASE_URL` on the project itself, so a deployment needs no further setup.
-The two tables (`streams`, `dismissed_streams`) are created on first use, which
-means every preview deployment's own Neon branch works without a migration
+The tables (`streams`, `dismissed_streams`, `admins`) are created on first use,
+which means every preview deployment's own Neon branch works without a migration
 step. There is no local database and no local fallback: without `DATABASE_URL`
 the wall's routes answer 503 and the page says so.
 
+## The admin panel
+
+`/admin` is the wall with moderation on it: take a stream off for everyone,
+clear every auto-sourced one, re-ask both platforms what is still live. Plus a
+read-out of which environment variables this deployment has — booleans only,
+because a panel that printed an API key to help you debug it would be the leak
+it was meant to prevent.
+
+Getting in takes three layers, and two of them are not passwords:
+
+1. **The Slate** — a handle and a passphrase, drawn as a clapperboard. This is
+   the layer that carries the entropy.
+2. **The Patch Bay** — three cables between six sources and six destinations.
+   Drag them, click them, or tab to them. Order doesn't matter; 2400 sets do.
+3. **The Vectorscope** — three notches out of twelve on a dial, in order. 1728
+   combinations.
+
+Layers two and three are puzzles, not passwords, and the code says so out loud.
+What makes them cost anything is that every layer is decided on the server —
+the browser is never sent the expected patch set or the combination — and that
+three wrong answers start a doubling lockout, capped at fifteen minutes. Progress
+between layers rides an HttpOnly, SameSite=Lax, HMAC-signed stage cookie naming
+which layer you actually reached, so answering layer three correctly without
+having passed layer two is a 401 rather than a sign-in.
+
+Two more variables, and neither has a fallback:
+
+```bash
+# .env.local
+ADMIN_SESSION_SECRET=…   # 32+ characters, signs the cookies
+ADMIN_SIGNUP_PASSWORD=…  # what makes signing up privileged
+```
+
+Unset either one and the panel answers 503 and refuses to open. A default for
+either would be a published credential — the kind that ships to production
+because it worked locally. Signing up is capped at eight accounts per deployment
+and does **not** sign you in: the account exists, and the gate is still the gate.
+
 ## Not built yet
 
-Accounts. The wall is shared but anonymous — anyone can put a stream up and
-anyone can take one down, and nothing records who did which. So is a chat of
-our own: the live chat you see is YouTube's, rendered by YouTube, and the notes
-tab is a local, per-browser stand-in for the half that would be ours.
+A chat of our own: the live chat you see is YouTube's, rendered by YouTube, and
+the notes tab is a local, per-browser stand-in for the half that would be ours.
+
+The public wall routes are still anonymous, deliberately — anyone can put a
+stream up and anyone can take one down, because the wall is meant to be
+everybody's. `/admin` adds a place where the same actions happen behind a
+sign-in; it does not yet record who did which.

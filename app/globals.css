@@ -260,6 +260,136 @@
     transform: scale(1.2);
   }
 
+  /* ---- The admin gate -----------------------------------------------------
+     Three layers, three animations, and one rule they all share: motion here
+     confirms an answer, it never decorates one. A cable draws itself because
+     it was just patched; the scope bursts because the combination was right;
+     everything shakes because it was wrong. Nothing loops for the look of it.
+     The global reduced-motion block below flattens all of it. */
+
+  /* The clapperboard arm. Open while you type, and it claps when you're let in. */
+  .slate-arm {
+    transform-box: fill-box;
+    transform-origin: 4% 90%;
+    transform: rotate(-22deg);
+    transition: transform 0.4s cubic-bezier(0.2, 0.9, 0.2, 1);
+  }
+
+  .slate-arm[data-clap="shut"] {
+    animation: slate-clap 0.55s cubic-bezier(0.3, 1.5, 0.4, 1) forwards;
+  }
+
+  @keyframes slate-clap {
+    0% {
+      transform: rotate(-22deg);
+    }
+    58% {
+      transform: rotate(5deg);
+    }
+    100% {
+      transform: rotate(0deg);
+    }
+  }
+
+  /* Wrong answer, at any layer. Short and sharp — 400ms, not a wobble. */
+  .gate-shake {
+    animation: gate-shake 0.4s ease-in-out;
+  }
+
+  @keyframes gate-shake {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    20% {
+      transform: translateX(-7px);
+    }
+    45% {
+      transform: translateX(6px);
+    }
+    70% {
+      transform: translateX(-3px);
+    }
+    88% {
+      transform: translateX(2px);
+    }
+  }
+
+  /* A cable draws itself from the jack you pulled it out of. */
+  .cable-draw {
+    stroke-dasharray: 700;
+    stroke-dashoffset: 700;
+    animation: cable-draw 0.45s ease-out forwards;
+  }
+
+  @keyframes cable-draw {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  /* And drops out of the bay when the set is refused. */
+  .cable-drop {
+    animation: cable-drop 0.4s ease-in forwards;
+  }
+
+  @keyframes cable-drop {
+    to {
+      opacity: 0;
+      transform: translateY(42px);
+    }
+  }
+
+  /* The ring that leaves a jack the moment something seats in it. */
+  .jack-ping {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: jack-ping 0.55s ease-out forwards;
+  }
+
+  @keyframes jack-ping {
+    from {
+      transform: scale(0.5);
+      opacity: 0.85;
+    }
+    to {
+      transform: scale(2.6);
+      opacity: 0;
+    }
+  }
+
+  /* The vectorscope opening its ring when the combination lands. */
+  .scope-burst {
+    animation: scope-burst 0.6s ease-out forwards;
+  }
+
+  @keyframes scope-burst {
+    from {
+      transform: scale(0.55);
+      opacity: 0.9;
+    }
+    to {
+      transform: scale(1.6);
+      opacity: 0;
+    }
+  }
+
+  /* Each layer arriving. One reveal, once, in the direction of travel. */
+  .gate-step {
+    animation: gate-step 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
+  @keyframes gate-step {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: var(--color-edge) transparent;
