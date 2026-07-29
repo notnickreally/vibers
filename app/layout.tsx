@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Bricolage_Grotesque, Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import { SiteHeader } from "@/components/chrome/site-header";
 import { SiteFooter } from "@/components/chrome/site-footer";
+import { ICON_PATH } from "@/lib/icon";
 import "./globals.css";
 
 const bricolage = Bricolage_Grotesque({
@@ -29,6 +30,12 @@ export const metadata: Metadata = {
   },
   description:
     "Put YouTube live coding streams on a wall, watch them side by side, and open the one you want.",
+  // The favicon is not a file in this build any more — it is a row in Neon that
+  // an admin changes from `/admin`, and this is the one URL that serves it. It
+  // carries no version on purpose: a versioned URL would mean reading the
+  // database to render every page. `/api/icon` answers with an `ETag` instead,
+  // and falls back to the shipped `public/icon.png` when nothing is up.
+  icons: { icon: ICON_PATH },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

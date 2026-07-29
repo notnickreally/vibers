@@ -136,4 +136,23 @@ async function migrate(): Promise<void> {
     CREATE INDEX IF NOT EXISTS watched_channels_added_at_idx
     ON watched_channels (added_at DESC)
   `;
+  // The face the whole site wears. One row, and `id` is the primary key with a
+  // constant value (`site`) rather than a serial — the table is a single global
+  // setting, so "the second favicon" is not a state it should be able to reach,
+  // and an upsert on a fixed key cannot create one. The image lives here as
+  // base64 rather than `BYTEA` because Neon's HTTP driver moves JSON, and a
+  // 64 KB string is a column, not a problem. `updated_at` doubles as the
+  // version every browser revalidates against — see `lib/icon.ts`.
+  await sql`
+    CREATE TABLE IF NOT EXISTS site_icon (
+      id           TEXT PRIMARY KEY,
+      content_type TEXT NOT NULL,
+      data         TEXT NOT NULL,
+      bytes        INTEGER NOT NULL,
+      width        INTEGER,
+      height       INTEGER,
+      updated_at   BIGINT NOT NULL,
+      updated_by   TEXT
+    )
+  `;
 }

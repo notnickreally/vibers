@@ -5,6 +5,7 @@ import { AdminUnconfigured, environmentReadout } from "@/lib/admin/config";
 import { currentAdmin } from "@/lib/admin/guard";
 import { roster } from "@/lib/admin/store";
 import { DatabaseUnconfigured } from "@/lib/db";
+import { iconSummary } from "@/lib/site-icon";
 import * as wall from "@/lib/wall";
 import { listWatched } from "@/lib/watchlist";
 
@@ -63,11 +64,12 @@ export default async function AdminPage() {
 
   if (!admin) redirect("/admin/login");
 
-  const [streams, dismissed, admins, watchlist] = await Promise.all([
+  const [streams, dismissed, admins, watchlist, icon] = await Promise.all([
     wall.listStreams(),
     wall.listDismissed(),
     roster(),
     listWatched(),
+    iconSummary(),
   ]);
 
   return (
@@ -80,6 +82,7 @@ export default async function AdminPage() {
           environment: environmentReadout(),
           admins,
           watchlist,
+          icon,
         }}
       />
     </div>
