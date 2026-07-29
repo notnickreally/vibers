@@ -1,6 +1,7 @@
 "use client";
 
 import type { DiscoverResult } from "@/lib/discover";
+import type { WatchlistResult, WatchReason } from "@/lib/watch";
 
 /**
  * What auto-sourcing did, said plainly.
@@ -15,6 +16,12 @@ import type { DiscoverResult } from "@/lib/discover";
  * is no API key, the day's search quota is spent, YouTube was unreachable, or
  * genuinely nothing matched — and they are not interchangeable. Collapsing them
  * into a shrug is the same failure as a dark tally lamp that never says why.
+ *
+ * Two findings land here, kept apart on purpose. Keyword search asks *what is
+ * live that matches "live coding"*, and it is the one that runs out of quota.
+ * The watchlist asks *are the channels an admin named on air*, and it never
+ * does, because reading a channel's newest videos costs nothing. Merging them
+ * into one line would make a spent search allowance look like nobody streaming.
  */
 
 const REASON: Record<NonNullable<DiscoverResult["reason"]>, string> = {
@@ -26,19 +33,49 @@ const REASON: Record<NonNullable<DiscoverResult["reason"]>, string> = {
   upstream: "Couldn't reach YouTube's search just now. The wall keeps everything it already has.",
 };
 
+/**
+ * The watchlist's own reasons. `empty` has no line here — nobody being watched
+ * is a setting, not a failure, and it is not a visitor's business.
+ */
+const WATCH_REASON: Record<Exclude<WatchReason, "empty">, string> = {
+  "no-key": "Watched YouTube channels need YOUTUBE_API_KEY before one can be called live.",
+  "no-twitch-credentials":
+    "Watched Twitch channels need TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET before one can be called live.",
+  upstream: "A platform didn't answer when the watched channels were checked.",
+};
+
+/** What the watchlist leg of the run found, or why it found nothing. */
+function watchLine(watchlist: WatchlistResult | null): string {
+  if (!watchlist || watchlist.watched === 0) return "";
+  if (watchlist.found > 0) {
+    return `${watchlist.found} watched ${
+      watchlist.found === 1 ? "channel is" : "channels are"
+    } on air, and up.`;
+  }
+  const said = watchlist.reasons
+    .filter((reason): reason is Exclude<WatchReason, "empty"> => reason !== "empty")
+    .map((reason) => WATCH_REASON[reason]);
+  return said.length > 0
+    ? said.join(" ")
+    : `None of the ${watchlist.watched} watched channels is on air.`;
+}
+
 export function AutoSource({
   state,
   result,
+  watchlist,
   count,
   onClear,
 }: {
   state: "idle" | "sourcing" | "done";
   result: DiscoverResult | null;
+  watchlist: WatchlistResult | null;
   count: number;
   onClear: () => void;
 }) {
   const reason = result?.reason;
   const keywords = result?.keywords ?? [];
+  const watched = watchLine(watchlist);
 
   const line =
     state === "sourcing"
@@ -71,6 +108,10 @@ export function AutoSource({
       </div>
 
       <p className="mt-2 font-mono text-[11px] leading-relaxed text-muted">{line}</p>
+
+      {state === "done" && watched !== "" && (
+        <p className="mt-1.5 font-mono text-[11px] leading-relaxed text-faint">{watched}</p>
+      )}
 
       {keywords.length > 0 && (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">

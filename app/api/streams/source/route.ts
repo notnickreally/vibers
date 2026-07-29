@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
 import { failed } from "@/app/api/streams/failure";
 import { discover } from "@/lib/sourcing";
-import * as wall from "@/lib/wall";
+import { sourceWatched } from "@/lib/watch-run";
 
 /**
  * Go and find live streams, and fold what is found into the shared wall.
  *
- * The merge is `mergeSourced`'s, unchanged and still pure — a stream someone
- * added by hand is never evicted, a stream anyone threw off never comes back,
- * sourced entries are capped and swept after a day.
+ * Two ways of finding them, and they answer different questions. Keyword
+ * sourcing asks *what is live that matches "live coding"*; the watchlist asks
+ * *are the people we named on air*. Both land through `mergeSourced` in one
+ * write — see `lib/watch-run.ts` for why the order of the two lists matters —
+ * so a stream someone added by hand is never evicted, a stream anyone threw off
+ * never comes back, and sourced entries are capped and swept after a day.
  *
  * What *has* changed is where the writing happens. On a per-browser wall two
  * tabs merging at once each clobbered the other's result and nobody could
@@ -16,20 +19,20 @@ import * as wall from "@/lib/wall";
  * one row set, so the losing side of a race is a duplicate of the winner
  * rather than a lost update.
  *
- * A discovery that finds nothing — switched off, no key, quota spent, YouTube
- * unreachable — still answers 200 with its reason. The wall keeps what it has
- * and the panel says why, which is the whole reason `reason` exists.
+ * A run that finds nothing — switched off, no key, quota spent, YouTube
+ * unreachable, nobody watched — still answers 200 with its reason. The wall
+ * keeps what it has and the panel says why, which is the whole reason `reason`
+ * exists.
  */
 
 export const revalidate = 0;
 
 export async function POST() {
-  const result = await discover(Date.now());
+  const now = Date.now();
+  const result = await discover(now);
   try {
-    return NextResponse.json({
-      streams: await wall.applySourced(result.streams, Date.now()),
-      result,
-    });
+    const run = await sourceWatched(result.streams, now);
+    return NextResponse.json({ streams: run.streams, result, watchlist: run.watchlist });
   } catch (err) {
     return failed(err);
   }
