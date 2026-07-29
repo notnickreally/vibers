@@ -2,13 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   cardState,
   DEFAULT_MODE,
-  initialShelf,
+  DEFAULT_VIEW,
   mergeStatuses,
   MODES,
   partition,
   shelf,
+  shelvesFor,
   type Status,
   type Stream,
+  WALL_VIEWS,
 } from "./stream";
 
 /**
@@ -124,19 +126,32 @@ describe("partition", () => {
   });
 });
 
-describe("initialShelf", () => {
-  it("opens on live when anything is live", () => {
-    expect(initialShelf([stream({ isLive: true }), stream({ isLive: false })])).toBe("live");
+describe("the wall's views", () => {
+  // The All view is what makes the wall one feed rather than two screens, and
+  // it is what retired `initialShelf`: no default view can hide a shelf, so
+  // there is no empty Live tab to open on and correct for.
+  it("opens on everything", () => {
+    expect(DEFAULT_VIEW).toBe("all");
   });
 
-  // Opening on an empty Live tab when the whole wall has finished is a blank
-  // screen over a wall that has plenty on it.
-  it("opens on ended when nothing is live", () => {
-    expect(initialShelf([stream({ isLive: false })])).toBe("ended");
+  it("keeps the tab bar — the filters are still there beside the feed", () => {
+    expect(WALL_VIEWS).toEqual(["all", "live", "ended"]);
   });
 
-  it("opens on live for an empty wall, so the empty state is the wall's own", () => {
-    expect(initialShelf([])).toBe("live");
+  // Live first, ended under it. This is the order the page stacks them in, so
+  // it is the order you scroll through, and it is the whole ticket.
+  it("stacks live above ended in the feed", () => {
+    expect(shelvesFor("all")).toEqual(["live", "ended"]);
+  });
+
+  it("narrows to one shelf when a shelf is picked", () => {
+    expect(shelvesFor("live")).toEqual(["live"]);
+    expect(shelvesFor("ended")).toEqual(["ended"]);
+  });
+
+  it("shows every shelf across the views, so nothing is unreachable", () => {
+    const reachable = new Set(WALL_VIEWS.flatMap(shelvesFor));
+    expect([...reachable].sort()).toEqual(["ended", "live"]);
   });
 });
 

@@ -11,8 +11,8 @@ export const metadata: Metadata = {
 export default function HomePage() {
   return (
     <div className="mx-auto max-w-[1600px] px-4 py-10 sm:px-6">
-      {/* Not "Live now" any more: the wall has an Ended tab, and half of what
-          it holds is deliberately not live. */}
+      {/* Not "Live now" any more: the feed carries what has ended underneath
+          what is on air, and half of what it holds is deliberately not live. */}
       <SectionHead
         slate="The wall"
         title="The wall"
