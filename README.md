@@ -23,13 +23,17 @@ timestamps honoured — or any Twitch one: a channel (`twitch.tv/someone`), a VO
 platform rather than typed in, so nothing can be misattributed. See
 [Twitch](#twitch) for what a channel entry means.
 
-**The wall.** Two tabs and two views. **Live** is the wall proper; a broadcast
-that finishes moves to **Ended**, where the tiles go quiet and grey and never
-take a player — a grid of finished VODs all restarting from 0:00 is not a
-monitor wall. Liveness is re-asked once on load, batched fifty ids to a call,
-so a stream that ends while it is up actually moves. Within a tab, **Posters**
-shows thumbnails — cheap and quiet — and **Monitors** swaps every tile for a
-live muted player, so the whole wall plays at once like a gallery of screens.
+**The wall.** One feed, three tabs and two views. The wall reads top to bottom:
+what is **live** first, and everything that has **ended** stacked underneath it,
+so a finished broadcast is a scroll away rather than behind a tab. The tab bar
+filters that feed — **All**, **Live**, **Ended** — rather than being the only
+route to half of it. Ended tiles go quiet and grey and never take a player in
+any view; a grid of finished VODs all restarting from 0:00 is not a monitor
+wall, and it is also why stacking both halves costs no more than the live half
+alone did. Liveness is re-asked once on load, batched fifty ids to a call, so a
+stream that ends while it is up actually moves. Across all of it, **Posters**
+shows thumbnails — cheap and quiet — and **Monitors** swaps every live tile for
+a muted player, so the whole wall plays at once like a gallery of screens.
 The grid runs 2, 3 or 4 across. The wall lives in Postgres, so it is the same
 wall on every device and it is still there tomorrow — and taking a stream off
 takes it off for everyone, which is the other half of what shared means.

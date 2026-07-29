@@ -248,10 +248,32 @@ export function stateLabel(stream: Stream): string {
   return state === "ended" ? "Ended" : "Video";
 }
 
-/** Opening on an empty Live tab when everything has ended helps nobody. */
-export function initialShelf(streams: Stream[]): Shelf {
-  const { live } = partition(streams);
-  return live.length === 0 && (streams?.length ?? 0) > 0 ? "ended" : "live";
+/**
+ * The wall's three views — what the tab bar selects.
+ *
+ * A shelf is a fact about a stream; a view is a question being asked of the
+ * wall, and the two stopped being the same thing when the wall became one feed.
+ * **All** stacks both shelves — live first, ended underneath, reached by
+ * scrolling — and **Live** and **Ended** narrow that feed to one shelf. So the
+ * tabs filter the wall rather than being the only route to half of it: what is
+ * ended is always one scroll away, and the tab bar is still there for when you
+ * want only one kind.
+ *
+ * This is what replaced `initialShelf`, which existed to stop the wall opening
+ * on an empty Live tab when everything had ended. All answers that structurally
+ * instead of by guessing: there is no default view that can hide what the wall
+ * holds, so there is nothing to correct for on load.
+ */
+export type WallView = "all" | Shelf;
+
+export const WALL_VIEWS: WallView[] = ["all", "live", "ended"];
+
+/** Everything, live first — the wall is about what is on air, not only about it. */
+export const DEFAULT_VIEW: WallView = "all";
+
+/** The shelves a view shows, in the order the feed stacks them down the page. */
+export function shelvesFor(view: WallView): Shelf[] {
+  return view === "all" ? ["live", "ended"] : [view];
 }
 
 /**
