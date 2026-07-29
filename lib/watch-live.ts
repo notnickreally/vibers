@@ -26,6 +26,15 @@
  * were on now; without Twitch credentials the Twitch half does the same. A
  * reason is not a failure — the wall keeps what it has and the panel explains
  * itself, the same bargain `lib/discover.ts` already strikes.
+ *
+ * **Both YouTube legs are cached, and one caller has to opt out.** Sharing a
+ * feed read across every visitor for `FEED_TTL` is what makes the paragraph
+ * above true, so a page load must keep it. An operator pressing **Check now**
+ * is asking a different question — not "what did we last hear" but "what is
+ * true this second" — and a cached answer from before the broadcast started
+ * leaves a channel that is plainly on air reading "not seen on air yet" on the
+ * panel until the TTL runs out. So `fresh` goes past the cache on both legs.
+ * Twitch never needed the flag: `helix()` is `no-store` already.
  */
 
 import "server-only";
@@ -52,6 +61,20 @@ export interface WatchSweep {
   result: WatchlistResult;
 }
 
+/** What Next reads off an init to decide whether this leg may be served a cached answer. */
+type Reads = { cache: "no-store" } | { next: { revalidate: number } };
+
+/**
+ * How one upstream read is allowed to be cached, by who asked for the sweep.
+ *
+ * One line rather than two ternaries at the call sites, because the reason is
+ * the same on both legs and is worth stating once: a shared answer is the point
+ * on the visitor path and the bug on the operator's.
+ */
+function reads(fresh: boolean, ttl: number): Reads {
+  return fresh ? { cache: "no-store" } : { next: { revalidate: ttl } };
+}
+
 /**
  * One channel's recent video ids, from its feed.
  *
@@ -59,13 +82,13 @@ export interface WatchSweep {
  * unreachable is fewer streams, not no streams, and a watchlist of fifty must
  * not be taken down by one of them.
  */
-async function feedIds(channelId: string): Promise<string[] | null> {
+async function feedIds(channelId: string, fresh: boolean): Promise<string[] | null> {
   const url = feedUrl(channelId);
   if (!url) return [];
   try {
     const res = await fetch(url, {
       headers: { accept: "application/atom+xml,text/xml" },
-      next: { revalidate: FEED_TTL },
+      ...reads(fresh, FEED_TTL),
     });
     if (!res.ok) return null;
     return readFeedIds(await res.text());
@@ -86,6 +109,7 @@ async function feedIds(channelId: string): Promise<string[] | null> {
 async function youtubeLive(
   channels: Watched[],
   reasons: Set<WatchReason>,
+  fresh: boolean,
 ): Promise<{ streams: Metadata[]; keys: string[] }> {
   if (channels.length === 0) return { streams: [], keys: [] };
 
@@ -101,7 +125,7 @@ async function youtubeLive(
   const owner = new Map<string, string>();
   const candidates: string[] = [];
   for (const channel of channels) {
-    const ids = await feedIds(channel.id);
+    const ids = await feedIds(channel.id, fresh);
     if (ids === null) {
       reasons.add("upstream");
       continue;
@@ -125,9 +149,10 @@ async function youtubeLive(
       key,
     });
     try {
-      const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?${params}`, {
-        next: { revalidate: CONFIRM_TTL },
-      });
+      const res = await fetch(
+        `https://www.googleapis.com/youtube/v3/videos?${params}`,
+        reads(fresh, CONFIRM_TTL),
+      );
       if (!res.ok) {
         reasons.add("upstream");
         continue;
@@ -206,8 +231,15 @@ async function twitchLive(
  * Both platforms are asked in parallel — they share nothing, and a slow feed on
  * one side should not delay the other. Neither ever throws: the caller folds
  * what came back into the wall and shows the reasons for what did not.
+ *
+ * `fresh` is for a sweep somebody triggered on purpose — the panel's **Check
+ * now** and its own cycle. It costs one uncached feed read per YouTube channel
+ * (keyless and free) and one quota unit per fifty candidates out of ten
+ * thousand a day, which is what an answer that is actually current is worth to
+ * the one person standing in front of the panel. Every visitor's page load
+ * leaves it off and keeps the shared cache the header argues for.
  */
-export async function sweepWatchlist(channels: Watched[]): Promise<WatchSweep> {
+export async function sweepWatchlist(channels: Watched[], fresh = false): Promise<WatchSweep> {
   const reasons = new Set<WatchReason>();
   if (channels.length === 0) {
     return { streams: [], liveKeys: [], result: { watched: 0, found: 0, reasons: ["empty"] } };
@@ -217,6 +249,7 @@ export async function sweepWatchlist(channels: Watched[]): Promise<WatchSweep> {
     youtubeLive(
       channels.filter((c) => c.provider === "youtube"),
       reasons,
+      fresh,
     ),
     twitchLive(
       channels.filter((c) => c.provider === "twitch"),

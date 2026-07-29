@@ -111,12 +111,21 @@ export async function POST(request: Request) {
   }
 }
 
-/** Check every watched channel right now, and put the live ones up. */
+/**
+ * Check every watched channel right now, and put the live ones up.
+ *
+ * **Right now** is load-bearing, which is why this is the one caller that asks
+ * for a fresh sweep. The same sequence on a page load reads YouTube through a
+ * two-minute shared cache, and a channel that went on air inside that window
+ * comes back unconfirmed — so an operator pressing **Check now** on a stream
+ * they can plainly see would keep being told the channel has never been seen on
+ * air. See `lib/watch-live.ts` for what `fresh` costs.
+ */
 export async function PUT(request: Request) {
   if (!sameOrigin(request)) return forbidden();
   try {
     if (!(await currentAdmin(Date.now()))) return unauthorized();
-    const run = await sourceWatched([], Date.now());
+    const run = await sourceWatched([], Date.now(), true);
     return NextResponse.json({
       streams: run.streams,
       watchlist: await listWatched(),
