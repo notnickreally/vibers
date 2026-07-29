@@ -1,36 +1,47 @@
 "use client";
 
 import { useState } from "react";
+import { parseSource, PROVIDER_LABEL, sourceKey } from "@/lib/source";
 import { addStream, type Metadata, type Stream } from "@/lib/stream";
-import { parseYouTube } from "@/lib/youtube";
 
 /**
  * Paste a URL, get the real thing. The title, channel and thumbnail are pulled
- * from YouTube — nothing is typed in by hand, so nothing can be misattributed.
+ * from the platform it came from — nothing is typed in by hand, so nothing can
+ * be misattributed.
  *
  * One call rather than two now: the wall's route does the lookup itself, on
  * the server, because what lands here goes on everyone's wall.
+ *
+ * The box takes **YouTube or Twitch**, and it does not ask which. `parseSource`
+ * works it out from the link, so there is no picker to get wrong — one field,
+ * paste anything, and the only thing the interface has to say about platforms is
+ * which one it recognised.
  */
 export function AddStream({ onAdded }: { onAdded: (streams: Stream[]) => void }) {
   const [url, setUrl] = useState("");
   const [state, setState] = useState<"idle" | "looking" | "error">("idle");
   const [error, setError] = useState("");
   const [found, setFound] = useState<Metadata | null>(null);
+  const [platform, setPlatform] = useState("");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    const parsed = parseYouTube(url);
+    const parsed = parseSource(url);
     if (!parsed) {
       setState("error");
-      setError("That isn't a YouTube link. Try youtube.com/watch, youtu.be or /live/.");
+      setError(
+        "That isn't a YouTube or Twitch link. Try youtube.com/watch, youtu.be, /live/, " +
+          "twitch.tv/<channel>, twitch.tv/videos/… or a clip.",
+      );
       return;
     }
 
     setState("looking");
     setError("");
     setFound(null);
+    setPlatform(PROVIDER_LABEL[parsed.provider]);
     try {
-      const { streams, added } = await addStream(parsed.id);
+      const { streams, added } = await addStream(sourceKey(parsed));
       onAdded(streams);
       setFound(added);
       setUrl("");
@@ -55,7 +66,7 @@ export function AddStream({ onAdded }: { onAdded: (streams: Stream[]) => void })
               setUrl(e.target.value);
               if (state === "error") setState("idle");
             }}
-            placeholder="https://www.youtube.com/live/…"
+            placeholder="https://www.youtube.com/live/… or https://twitch.tv/…"
             className={`min-w-0 flex-1 border bg-ink px-3 py-2.5 font-mono text-[13px] text-bone placeholder:text-faint focus:outline-none ${
               state === "error" ? "border-del" : "border-edge focus:border-amber"
             }`}
@@ -77,7 +88,7 @@ export function AddStream({ onAdded }: { onAdded: (streams: Stream[]) => void })
       >
         {state === "error"
           ? error
-          : "The title and channel come straight from YouTube. Live streams, premieres and recorded videos all work."}
+          : "YouTube or Twitch — the title and channel come straight from whichever it is. Live streams, premieres, recorded videos, Twitch channels, VODs and clips all work."}
       </p>
 
       {found && (
@@ -86,7 +97,7 @@ export function AddStream({ onAdded }: { onAdded: (streams: Stream[]) => void })
           <img src={found.thumbnail} alt="" className="h-14 w-24 shrink-0 object-cover" />
           <div className="min-w-0">
             <p className="font-mono text-[10px] tracking-[0.14em] text-add uppercase">
-              Added to the wall
+              Added to the wall{platform && ` · ${platform}`}
             </p>
             <p className="mt-1 truncate text-sm text-bone">{found.title}</p>
             <p className="font-mono text-[11px] text-faint">{found.channel}</p>

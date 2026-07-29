@@ -9,6 +9,7 @@ import { LiveBadge } from "@/components/ui/bits";
 import type { DiscoverResult } from "@/lib/discover";
 import { compact } from "@/lib/format";
 import { YT_CHROME_MS } from "@/lib/player-time";
+import { embedFor, parseKey, watchHref } from "@/lib/source";
 import { safeHttpUrl } from "@/lib/youtube";
 import {
   cardState,
@@ -23,6 +24,7 @@ import {
   removeStream,
   type Shelf,
   shelf,
+  stateLabel,
   sourceStreams,
   type Stream,
 } from "@/lib/stream";
@@ -354,9 +356,11 @@ function Monitor({
           <LiveBadge />
         ) : (
           <span className="border border-edge px-1.5 py-0.5 font-mono text-[9px] tracking-[0.16em] text-faint uppercase">
-            {/* "Ended" is only ever said about something that actually ran.
-                A video that was never a broadcast says so instead. */}
-            {state === "ended" ? "Ended" : state === "video" ? "Video" : "Stream"}
+            {/* "Ended" is only ever said about something that actually ran; a
+                video that was never a broadcast says so instead, and a Twitch
+                channel that isn't broadcasting says "Offline" — there is no
+                video there at all. `stateLabel` holds that whole decision. */}
+            {stateLabel(stream)}
           </span>
         )}
         {stream.viewers !== undefined && (
@@ -388,7 +392,7 @@ function Monitor({
         {playing ? (
           <MonitorFrame stream={stream} />
         ) : (
-          <Link href={`/watch/${stream.videoId}`} className="absolute inset-0">
+          <Link href={watchHref(stream.videoId)} className="absolute inset-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={stream.thumbnail}
@@ -403,7 +407,7 @@ function Monitor({
       </div>
 
       <div className="p-3">
-        <Link href={`/watch/${stream.videoId}`}>
+        <Link href={watchHref(stream.videoId)}>
           <h3
             className={`line-clamp-2 text-sm leading-snug font-semibold transition-colors ${
               off ? "text-muted hover:text-bone" : "text-bone hover:text-amber"
@@ -426,7 +430,7 @@ function Monitor({
             <span>{stream.channel}</span>
           )}
           <span aria-hidden>·</span>
-          <Link href={`/watch/${stream.videoId}`} className="hover:text-bone">
+          <Link href={watchHref(stream.videoId)} className="hover:text-bone">
             Open
           </Link>
         </p>
@@ -459,6 +463,15 @@ function Monitor({
  */
 function MonitorFrame({ stream }: { stream: Stream }) {
   const [warm, setWarm] = useState(false);
+  // Twitch refuses to be framed without a `parent` matching this page's
+  // hostname exactly, and a hostname only exists in a browser — so the embed
+  // URL cannot be built during render. Until it is, the tile is its poster,
+  // which is what it would have been showing anyway.
+  const [host, setHost] = useState<string | null>(null);
+
+  useEffect(() => {
+    setHost(window.location.hostname);
+  }, []);
 
   useEffect(() => {
     setWarm(false);
@@ -468,17 +481,25 @@ function MonitorFrame({ stream }: { stream: Stream }) {
     return () => clearTimeout(id);
   }, []);
 
+  const source = parseKey(stream.videoId);
+  const src =
+    source && host
+      ? embedFor(source, { parent: host, autoplay: true, muted: true, controls: false })
+      : null;
+
   return (
     <>
-      <iframe
-        src={`https://www.youtube-nocookie.com/embed/${stream.videoId}?autoplay=1&mute=1&controls=0&rel=0&iv_load_policy=3&playsinline=1`}
-        title={stream.title}
-        allow="autoplay; encrypted-media; picture-in-picture"
-        // A four-wide grid mounts a dozen autoplaying embeds at once and
-        // saturates the connection pool; off-screen tiles wait their turn.
-        loading="lazy"
-        className="absolute inset-0 h-full w-full"
-      />
+      {src && (
+        <iframe
+          src={src}
+          title={stream.title}
+          allow="autoplay; encrypted-media; picture-in-picture"
+          // A four-wide grid mounts a dozen autoplaying embeds at once and
+          // saturates the connection pool; off-screen tiles wait their turn.
+          loading="lazy"
+          className="absolute inset-0 h-full w-full"
+        />
+      )}
       {/* The poster stays mounted and dissolves, so the hand-off to the first
           decoded frame is a cross-fade rather than a hard cut to whatever the
           embed happens to be showing at that instant. Same treatment as the
@@ -488,18 +509,18 @@ function MonitorFrame({ stream }: { stream: Stream }) {
         alt=""
         aria-hidden="true"
         className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ${
-          warm ? "opacity-0" : "opacity-100"
+          warm && src ? "opacity-0" : "opacity-100"
         }`}
       />
       <span
         className={`pointer-events-none absolute bottom-2 left-2 border border-edge bg-ink/85 px-1.5 py-0.5 font-mono text-[9px] tracking-[0.16em] text-bone uppercase transition-opacity duration-300 ${
-          warm ? "opacity-0" : "opacity-100"
+          warm || !src ? "opacity-0" : "opacity-100"
         }`}
       >
         Tuning in…
       </span>
       <Link
-        href={`/watch/${stream.videoId}`}
+        href={watchHref(stream.videoId)}
         aria-label={`Watch ${stream.title}`}
         className="absolute inset-0"
       />

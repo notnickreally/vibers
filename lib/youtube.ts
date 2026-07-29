@@ -158,14 +158,34 @@ export function parseYouTube(input: string): YouTubeSource | null {
   return null;
 }
 
-/** Privacy-preserving embed URL. Autoplay only works muted, so it starts muted. */
-export function embedUrl(source: YouTubeSource, { autoplay = true } = {}): string {
+/**
+ * Privacy-preserving embed URL. Autoplay only works muted, so it starts muted.
+ *
+ * `controls` is off for a wall tile and on everywhere else: a monitor is driven
+ * by nobody, so YouTube's control bar there is chrome that can only be summoned
+ * by accident. Annotations go with it — `iv_load_policy=3` — for the same
+ * reason. Both are YouTube's own parameters rather than anything we overlay.
+ */
+interface EmbedOptions {
+  autoplay?: boolean;
+  /** Autoplay only works muted, so this defaults to whatever `autoplay` is. */
+  muted?: boolean;
+  /** YouTube's own control bar. Off for wall tiles, on everywhere else. */
+  controls?: boolean;
+}
+
+export function embedUrl(
+  source: YouTubeSource,
+  { autoplay = true, muted = autoplay, controls = true }: EmbedOptions = {},
+): string {
   const params = new URLSearchParams({
     autoplay: autoplay ? "1" : "0",
-    mute: autoplay ? "1" : "0",
+    mute: muted ? "1" : "0",
     playsinline: "1",
     rel: "0",
     modestbranding: "1",
+    controls: controls ? "1" : "0",
+    iv_load_policy: "3",
   });
   if (source.start) params.set("start", String(source.start));
   return `https://www.youtube-nocookie.com/embed/${source.id}?${params}`;
