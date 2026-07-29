@@ -1,5 +1,5 @@
 /**
- * Is it still on air? — for a batch of ids at once.
+ * Is it still on air? — for a batch of the wall's keys at once.
  *
  * This is the network leg that `app/api/youtube/status` used to hold inline.
  * It moved out because there are now two callers: that route, still, and the
@@ -8,17 +8,27 @@
  * route handler is not an importable thing, and two spellings of "is it live"
  * is exactly how a tile ends up flickering between tabs.
  *
+ * It now takes **source keys**, not video ids, and splits them by platform:
+ * YouTube ids go to `videos.list`, Twitch channels go to Helix, and Twitch VODs
+ * and clips are answered without asking anyone — a recording is not a
+ * broadcast, and that is knowable without a credential.
+ *
  * Batched because it has to be: `videos.list` takes up to 50 ids per call and
  * costs one unit whether you ask about one video or fifty, so refreshing a
- * sixty-tile wall is two units out of a daily ten thousand.
+ * sixty-tile wall is two units out of a daily ten thousand. Helix takes 100
+ * logins per call, so the Twitch side of the same wall is one request.
  *
- * Without a key this answers `{}` rather than throwing. A wall that cannot
+ * Without a key each side answers `{}` rather than throwing. A wall that cannot
  * refresh should keep what it already knows, not lose it.
  */
 
 import "server-only";
 
+import { parseKey } from "./source";
 import type { Status } from "./stream";
+import type { TwitchSource } from "./twitch";
+import { twitchKey } from "./twitch";
+import { liveStreams } from "./twitch-api";
 import { chunk, isLive, MAX_IDS } from "./youtube";
 
 interface Item {
@@ -31,7 +41,7 @@ interface Item {
   };
 }
 
-export async function fetchStatuses(ids: string[]): Promise<Record<string, Status>> {
+async function youtubeStatuses(ids: string[]): Promise<Record<string, Status>> {
   const key = process.env.YOUTUBE_API_KEY;
   if (!key || ids.length === 0) return {};
 
@@ -63,4 +73,64 @@ export async function fetchStatuses(ids: string[]): Promise<Record<string, Statu
     }
   }
   return statuses;
+}
+
+/**
+ * The Twitch half.
+ *
+ * Two things here are the opposite of the YouTube branch above, and both follow
+ * from what Twitch's API actually says:
+ *
+ * - **A missing login means off air.** `/helix/streams` returns one row per
+ *   channel that is live and says nothing about the rest, so absence is a
+ *   confirmed `false` here — where on the YouTube side the same absence means
+ *   "we were told nothing" and the tile must be left alone.
+ * - **A VOD or a clip is answered with no request at all.** It is a recording;
+ *   it was never on air and never will be. Asking Twitch to confirm that would
+ *   spend a request to learn something the key already says.
+ *
+ * With no credentials the channels are dropped rather than reported off air.
+ * Guessing "not live" would file every live Twitch tile under Ended, which is
+ * the same mistake `shelf()` documents on the YouTube side.
+ */
+async function twitchStatuses(sources: TwitchSource[]): Promise<Record<string, Status>> {
+  const statuses: Record<string, Status> = {};
+  const logins: string[] = [];
+
+  for (const source of sources) {
+    if (source.kind === "channel") logins.push(source.id);
+    else statuses[twitchKey(source)] = { isLive: false };
+  }
+  if (logins.length === 0) return statuses;
+
+  const live = await liveStreams(logins);
+  // Null is "we were told nothing" — no credentials, a spent rate limit, an
+  // outage — and it leaves every channel exactly as it was. An empty map is a
+  // real answer meaning nobody is on air.
+  if (!live) return statuses;
+
+  for (const login of logins) {
+    const entry = live.get(login);
+    statuses[twitchKey({ kind: "channel", id: login })] = {
+      isLive: Boolean(entry),
+      viewers: entry?.viewer_count,
+    };
+  }
+  return statuses;
+}
+
+/** What every key on the wall is doing right now, keyed by that same key. */
+export async function fetchStatuses(keys: string[]): Promise<Record<string, Status>> {
+  const youtube: string[] = [];
+  const twitch: TwitchSource[] = [];
+
+  for (const key of keys) {
+    const source = parseKey(key);
+    if (!source) continue;
+    if (source.provider === "twitch") twitch.push(source);
+    else youtube.push(source.id);
+  }
+
+  const [yt, tw] = await Promise.all([youtubeStatuses(youtube), twitchStatuses(twitch)]);
+  return { ...yt, ...tw };
 }

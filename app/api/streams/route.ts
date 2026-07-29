@@ -1,20 +1,25 @@
 import { NextResponse } from "next/server";
 import { failed } from "@/app/api/streams/failure";
-import { LookupError, lookupVideo } from "@/lib/lookup";
+import { LookupError } from "@/lib/lookup";
+import { lookupSource } from "@/lib/lookup-source";
+import { parseKey, parseSource, PROVIDER_LABEL, sourceKey } from "@/lib/source";
 import * as wall from "@/lib/wall";
-import { parseYouTube } from "@/lib/youtube";
 
 /**
  * The wall itself — one shared wall, in Neon, for everybody.
  *
  * - `GET` — what is on it.
- * - `POST { v }` — put a stream up. **An id or a URL, and nothing else.** The
+ * - `POST { v }` — put a stream up. **A key or a URL, and nothing else.** The
  *   title, channel and thumbnail are looked up here rather than accepted from
  *   the caller: this list is rendered to every visitor, so a client-supplied
  *   title would be arbitrary text and a client-supplied thumbnail an arbitrary
  *   `img src`, on everyone's wall, from anyone who can reach this route.
- * - `DELETE ?v=<id>` — take one off. `DELETE ?sourced=1` — take every
+ * - `DELETE ?v=<key>` — take one off. `DELETE ?sourced=1` — take every
  *   auto-sourced one off.
+ *
+ * Both platforms come through the same door. What lands in the database is
+ * `lib/source.ts`' key — a bare video id for YouTube, a prefixed one for Twitch
+ * — and which platform it was is never a parameter the caller gets to set.
  *
  * Every response is the whole wall, so a client never has to reconstruct it
  * from a delta it may have raced someone else on.
@@ -39,18 +44,24 @@ export async function POST(request: Request) {
   }
 
   const raw = (input as { v?: unknown })?.v;
-  const source = typeof raw === "string" ? parseYouTube(raw) : null;
+  // A stored key as well as a pasted link: the watch page's "Add to wall"
+  // button holds the key it was opened with, not the URL someone typed.
+  const source = typeof raw === "string" ? (parseKey(raw) ?? parseSource(raw)) : null;
   if (!source) {
-    return NextResponse.json({ error: "That isn't a YouTube link." }, { status: 400 });
+    return NextResponse.json({ error: "That isn't a YouTube or Twitch link." }, { status: 400 });
   }
 
-  let meta: Awaited<ReturnType<typeof lookupVideo>>;
+  let meta: Awaited<ReturnType<typeof lookupSource>>;
   try {
-    meta = await lookupVideo(source.id);
+    meta = await lookupSource(source);
   } catch (err) {
     const fail = err instanceof LookupError ? err : null;
     return NextResponse.json(
-      { error: fail?.message ?? "Couldn't reach YouTube. Check the connection and try again." },
+      {
+        error:
+          fail?.message ??
+          `Couldn't reach ${PROVIDER_LABEL[source.provider]}. Check the connection and try again.`,
+      },
       { status: fail?.status ?? 502 },
     );
   }
@@ -70,11 +81,14 @@ export async function DELETE(request: Request) {
     if (params.get("sourced")) {
       return NextResponse.json({ streams: await wall.clearSourced(Date.now()) });
     }
-    const source = parseYouTube(params.get("v") ?? "");
+    const raw = params.get("v") ?? "";
+    const source = parseKey(raw) ?? parseSource(raw);
     if (!source) {
-      return NextResponse.json({ error: "Pass a video id as ?v=" }, { status: 400 });
+      return NextResponse.json({ error: "Pass a stream key as ?v=" }, { status: 400 });
     }
-    return NextResponse.json({ streams: await wall.removeStream(source.id, Date.now()) });
+    // Taking one off is keyed by what the row is keyed by, so the key is
+    // rebuilt from the parse rather than trusting the string that arrived.
+    return NextResponse.json({ streams: await wall.removeStream(sourceKey(source), Date.now()) });
   } catch (err) {
     return failed(err);
   }

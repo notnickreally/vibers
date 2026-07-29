@@ -1,6 +1,6 @@
 /**
- * The wall's contents. Every field here comes from YouTube — nothing on
- * vibers.tv is invented about a stream or its creator.
+ * The wall's contents. Every field here comes from the platform the stream is
+ * on — nothing on vibers.tv is invented about a stream or its creator.
  *
  * The wall is **shared**. It lives in a Neon Postgres database behind
  * `app/api/streams`, so a stream anyone puts up is on the wall for everyone,
@@ -24,8 +24,18 @@
 
 import { clearMessages } from "./chat";
 import type { DiscoverResult } from "./discover";
+import { parseKey } from "./source";
 
 export interface Stream {
+  /**
+   * The **source key** — what the wall stores, and what `/watch/<key>` carries.
+   *
+   * Still called `videoId` because that is the column, the URL segment and the
+   * prop name everywhere, and renaming it would be a migration for a word. What
+   * it holds is `lib/source.ts`' key: a bare eleven-character id is YouTube, and
+   * anything with a provider prefix (`twitch:channel:someone`) is that provider.
+   * Never parse it by hand — `parseKey` is the one place that knows.
+   */
   videoId: string;
   title: string;
   channel: string;
@@ -82,8 +92,9 @@ async function ask<T>(path: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
+/** Ask the site what a link or a stored key actually is. Either platform. */
 export async function lookup(input: string): Promise<Metadata> {
-  return ask<Metadata>(`/api/youtube?v=${encodeURIComponent(input)}`);
+  return ask<Metadata>(`/api/lookup?v=${encodeURIComponent(input)}`);
 }
 
 export async function listStreams(): Promise<Stream[]> {
@@ -203,6 +214,27 @@ export function cardState(stream: Stream): CardState {
   if (stream?.endedAt) return "ended";
   if (stream?.isLive === false) return "video";
   return "unknown";
+}
+
+/**
+ * What the card actually *says* — the state, in the words of its platform.
+ *
+ * `cardState` is about the facts and stays platform-blind; this is about the
+ * noun, and the noun differs. A Twitch **channel** that is confirmed not live is
+ * "Offline", not "Video": there is no video there, only a channel that isn't
+ * broadcasting, and it will be a different broadcast when it is. Saying "Video"
+ * over it would be the same category error `cardState` already avoids by
+ * refusing to say "Ended" over something that was never a broadcast.
+ *
+ * A Twitch VOD or clip really is a recording, so it keeps "Video".
+ */
+export function stateLabel(stream: Stream): string {
+  const state = cardState(stream);
+  if (state === "live") return "Live";
+  if (state === "unknown") return "Stream";
+  const source = parseKey(stream?.videoId ?? "");
+  if (source?.provider === "twitch" && source.kind === "channel") return "Offline";
+  return state === "ended" ? "Ended" : "Video";
 }
 
 /** Opening on an empty Live tab when everything has ended helps nobody. */

@@ -4,16 +4,34 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { LiveChat } from "@/components/chat/live-chat";
 import { CleanPlayer } from "@/components/player/clean-player";
+import { TwitchPlayer } from "@/components/player/twitch-player";
 import { ErrorState } from "@/components/states";
 import { compact } from "@/lib/format";
+import {
+  parseKey,
+  PROVIDER_LABEL,
+  sourceNoun,
+  watchHref,
+  watchLinkUrl,
+} from "@/lib/source";
 import { addStream, listStreams, lookup, type Stream } from "@/lib/stream";
 import { safeHttpUrl } from "@/lib/youtube";
 
 /**
  * One stream, full size. Metadata is looked up live rather than trusted from
- * whatever is cached, so an open tab shows the video's real current title.
+ * whatever is cached, so an open tab shows the stream's real current title.
+ *
+ * The picture is whichever player the key calls for — `CleanPlayer` drives
+ * YouTube through its IFrame API, `TwitchPlayer` frames Twitch's own — and
+ * everything under it is shared, because a title, a channel, a description and
+ * a chat are the same furniture whoever is hosting the video.
  */
 export function WatchView({ videoId }: { videoId: string }) {
+  // The key is the page's whole input, and it has already been through
+  // `parseKey` on the server — a segment that doesn't parse is a 404 before
+  // this component exists. Parsed again here because what the player needs is
+  // the source, not the string.
+  const source = parseKey(videoId);
   const [stream, setStream] = useState<Stream | null>(null);
   const [others, setOthers] = useState<Stream[]>([]);
   const [error, setError] = useState("");
@@ -63,8 +81,8 @@ export function WatchView({ videoId }: { videoId: string }) {
   if (error) {
     return (
       <ErrorState
-        code="youtube/lookup-failed"
-        title="That video wouldn't load"
+        code={`${source?.provider ?? "stream"}/lookup-failed`}
+        title={`That ${source ? sourceNoun(source) : "stream"} wouldn't load`}
         body={error}
         action={
           <Link
@@ -84,12 +102,21 @@ export function WatchView({ videoId }: { videoId: string }) {
   return (
     <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="min-w-0">
-        <CleanPlayer
-          videoId={videoId}
-          isLive={stream?.isLive}
-          title={stream?.title}
-          channel={stream?.channel}
-        />
+        {source?.provider === "twitch" ? (
+          <TwitchPlayer
+            source={source}
+            isLive={stream?.isLive}
+            title={stream?.title}
+            channel={stream?.channel}
+          />
+        ) : (
+          <CleanPlayer
+            videoId={videoId}
+            isLive={stream?.isLive}
+            title={stream?.title}
+            channel={stream?.channel}
+          />
+        )}
 
         {/* Everything YouTube would have put on the picture, put underneath.
             The title and the live lamp live in the player's own title strip
@@ -101,16 +128,18 @@ export function WatchView({ videoId }: { videoId: string }) {
                 {compact(stream.viewers)} watching
               </span>
             )}
-            <a
-              href={`https://www.youtube.com/watch?v=${videoId}`}
-              target="_blank"
-              rel="noreferrer"
-              className="ml-auto border border-edge px-3 py-1.5 font-mono text-[10px] tracking-[0.1em] text-teal uppercase transition-colors hover:border-teal"
-            >
-              Watch on YouTube ↗
-            </a>
+            {source && (
+              <a
+                href={watchLinkUrl(source)}
+                target="_blank"
+                rel="noreferrer"
+                className="ml-auto border border-edge px-3 py-1.5 font-mono text-[10px] tracking-[0.1em] text-teal uppercase transition-colors hover:border-teal"
+              >
+                Watch on {PROVIDER_LABEL[source.provider]} ↗
+              </a>
+            )}
             <Link
-              href={`/report?v=${videoId}`}
+              href={`/report?v=${encodeURIComponent(videoId)}`}
               className="border border-edge px-3 py-1.5 font-mono text-[10px] tracking-[0.1em] text-muted uppercase transition-colors hover:border-del hover:text-del"
             >
               Report
@@ -199,7 +228,7 @@ export function WatchView({ videoId }: { videoId: string }) {
           <ul className="space-y-3">
             {others.map((s) => (
               <li key={s.videoId}>
-                <Link href={`/watch/${s.videoId}`} className="group flex gap-3">
+                <Link href={watchHref(s.videoId)} className="group flex gap-3">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={s.thumbnail}

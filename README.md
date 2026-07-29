@@ -1,8 +1,8 @@
 # vibers.tv
 
-A wall of live coding streams. Paste a YouTube URL, it joins the wall with its
-real title and channel, and you can watch the whole wall at once or open one
-stream on a clean player. One wall, shared by everyone — what you put up is
+A wall of live coding streams. Paste a YouTube or Twitch URL, it joins the wall
+with its real title and channel, and you can watch the whole wall at once or open
+one stream on a clean player. One wall, shared by everyone — what you put up is
 what the next visitor sees.
 
 ```bash
@@ -11,14 +11,17 @@ pnpm dev        # http://localhost:3000
 ```
 
 No fixture data, no invented people, no fake counts. Everything on screen either
-came from YouTube or you put it there.
+came from the platform it plays on or you put it there.
 
 ## How it works
 
 **Add a stream.** Paste any YouTube URL on the wall — `watch?v=`, `youtu.be`,
 `/live/`, `/embed/`, `/shorts/`, or a bare 11-character id, with `?t=`
-timestamps honoured. The title, channel and thumbnail are fetched from YouTube
-rather than typed in, so nothing can be misattributed.
+timestamps honoured — or any Twitch one: a channel (`twitch.tv/someone`), a VOD
+(`/videos/123`, `/someone/v/123`), or a clip (`clips.twitch.tv/Slug`,
+`/someone/clip/Slug`). The title, channel and thumbnail are fetched from the
+platform rather than typed in, so nothing can be misattributed. See
+[Twitch](#twitch) for what a channel entry means.
 
 **The wall.** Two tabs and two views. **Live** is the wall proper; a broadcast
 that finishes moves to **Ended**, where the tiles go quiet and grey and never
@@ -52,7 +55,9 @@ one, carried in YouTube's own embedded `live_chat` frame — no API key, no
 quota, and vibers.tv never holds a message. Reading needs no account. **Notes**
 is your own transcript against the video, kept in this browser and sent nowhere,
 live across your own tabs. It's what works on a VOD, where there is no chat to
-carry.
+carry. A Twitch channel brings its own chat into the same tab, with its own
+sign-in inside the frame — and none of the window dance below, which is Google's
+problem rather than a general one.
 
 **Posting.** *Sign in to post* opens a real window on YouTube's own
 `/signin?next=…` redirector, landing you in that stream's pop-out chat with a
@@ -106,7 +111,48 @@ unexplained.
 The live chat needs none of this. It rides YouTube's own frame, so it works
 with zero setup whether or not a key is set.
 
+## Twitch
+
+Twitch works with **zero setup**, same as YouTube's baseline. The title, channel
+and preview come off the channel page's own Open Graph tags — no key, no quota —
+and the picture is Twitch's own player under `player.twitch.tv`.
+
+```bash
+# .env.local — optional, and only for the tally lamp and viewer counts
+TWITCH_CLIENT_ID=your-client-id
+TWITCH_CLIENT_SECRET=your-client-secret
+```
+
+With those two set, `lib/twitch-api.ts` mints an app token (client credentials,
+server-side only, cached until it expires) and asks Helix who is actually on air
+— a hundred channels to a call, matching how the YouTube side batches. Without
+them a Twitch tile still plays; it just never lights the tally lamp, exactly as
+an un-keyed YouTube stream doesn't.
+
+Three things about Twitch are worth knowing before reading the code:
+
+- **A live stream has no id of its own.** What is on air is addressed by
+  *channel*, so a live Twitch entry on the wall is a channel login, and it is the
+  one kind of wall entry whose content changes underneath it. VODs and clips have
+  ids and behave like YouTube videos — including going **Ended** on the wall,
+  because a recording was never on air.
+- **`parent` is the whole gate on framing.** `player.twitch.tv` and
+  `twitch.tv/embed/<login>/chat` answer `frame-ancestors <your parent>`, and
+  refuse outright without one. It takes the bare hostname, exactly — the same
+  bargain YouTube's `live_chat` makes through `embed_domain`. A hostname only
+  exists in a browser, so a Twitch frame is never built during a server render;
+  the first paint is the poster at the picture's exact size.
+- **Only a channel has chat.** Twitch keeps none against a VOD or a clip, so the
+  panel says that rather than framing a rectangle that will never fill.
+
+The Twitch player keeps **Twitch's own control bar**, unlike the YouTube one.
+There is no Twitch counterpart to the IFrame Player API work behind our own
+controls, and hiding a control bar without replacing it would leave a picture
+nobody can drive.
+
 ## Auto-sourcing, and the one number it lives inside
+
+YouTube only, for now — a Twitch stream goes up because someone pasted it.
 
 ```bash
 # .env.local
@@ -162,9 +208,9 @@ is what makes carrying other people's streams defensible, so it stays.
 
 ## Rights
 
-Video is never re-hosted. Every stream plays through YouTube's own embedded
-player, so the only copy lives on YouTube, ads and all. Channels that disable
-embedding simply don't play here — their choice, enforced automatically.
+Video is never re-hosted. Every stream plays through its own platform's embedded
+player, so the only copy lives on YouTube or Twitch, ads and all. Channels that
+disable embedding simply don't play here — their choice, enforced automatically.
 
 Every stream links back to its video and channel, and `/report` takes a takedown
 without an account. A stream comes off the wall as soon as a report names it,
@@ -177,7 +223,8 @@ before anyone judges it.
 | `/` | The wall — add streams, posters/monitors view, grid sizing |
 | `/watch/[id]` | One stream on the clean player, with title, channel, description, and the chat panel |
 | `/report` | Takedown path for a creator |
-| `/api/youtube?v=` | Metadata lookup (oEmbed, plus Data API when a key is set) |
+| `/api/lookup?v=` | Metadata lookup for either platform — takes a pasted link or a stored key |
+| `/api/youtube?v=` | The YouTube-only lookup (oEmbed, plus Data API when a key is set) |
 | `/api/youtube/status?ids=` | Batched liveness for the whole wall at once |
 | `/api/youtube/discover` | Keyword auto-sourcing — takes no input, by design |
 | `/api/streams` | The shared wall: `GET` it, `POST {v}` to put one up, `DELETE ?v=` / `?sourced=1` to take one off |
@@ -195,12 +242,20 @@ before anyone judges it.
   `mergeStatuses`, `mergeSourced`), and async `fetch` calls that ask. There is
   no local fallback — if the database can't be reached the wall says so rather
   than rendering an empty grid that looks exactly like an empty wall.
-- **Streams go up by id.** `POST /api/streams` takes a YouTube id or URL and
-  nothing else, and looks the video up itself. A client-supplied title would be
-  arbitrary text and a client-supplied thumbnail an arbitrary `img src`, on
-  everyone's wall, from anyone who can reach the route.
-- `lib/youtube.ts` parses URLs and builds embed URLs; `components/player/`
-  wraps the IFrame Player API; `components/wall/` is the wall and watch view.
+- **Streams go up by id.** `POST /api/streams` takes a link or an id and nothing
+  else, and looks it up itself. A client-supplied title would be arbitrary text
+  and a client-supplied thumbnail an arbitrary `img src`, on everyone's wall,
+  from anyone who can reach the route.
+- **`lib/source.ts` is the seam between the platforms**, and the key format is
+  the compatibility promise: a YouTube id stays a bare id — every row already in
+  Neon and every `/watch/<id>` link already shared still resolves — and anything
+  else carries its provider in front of it, today `twitch:channel:<login>`. A new
+  platform adds a prefix and a branch, never a migration. Everything upstream
+  asks `lib/source.ts` what a stored key is and gets back an embed, a poster, a
+  link out and a label without naming a platform itself.
+- `lib/youtube.ts` and `lib/twitch.ts` parse URLs and build embed URLs;
+  `components/player/` wraps the IFrame Player API for YouTube and frames
+  Twitch's own player; `components/wall/` is the wall and watch view.
 - No `Math.random()` or `Date.now()` during render, so server and client always
   agree on the first paint.
 

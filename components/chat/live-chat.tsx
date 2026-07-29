@@ -24,6 +24,13 @@ import {
   type SignInWindow,
   stamp,
 } from "@/lib/chat";
+import {
+  chatFrameUrl,
+  chatPopoutUrl,
+  parseKey,
+  PROVIDER_LABEL,
+  sourceNoun,
+} from "@/lib/source";
 import { liveChatPopoutUrl, liveChatSignInUrl, liveChatUrl } from "@/lib/youtube";
 
 /**
@@ -49,6 +56,14 @@ import { liveChatPopoutUrl, liveChatSignInUrl, liveChatUrl } from "@/lib/youtube
  * `requestStorageAccess()`, belongs to YouTube's document, not ours. So the
  * reload is offered as a *maybe*, worded as one, and the frame is presented as
  * the read-along it reliably is.
+ *
+ * **Twitch carries its own chat, and none of the sign-in dance.** Twitch frames
+ * `twitch.tv/embed/<login>/chat` under the same bargain YouTube makes — the
+ * parent hostname, exactly — but its chat document has a working sign-in of its
+ * own inside the frame, so there is no top-level window to open and no phase
+ * machine to run. What Twitch does *not* have is a chat for a VOD or a clip:
+ * there is no document to frame at all, so `chatFrameUrl` returns null and the
+ * panel says so rather than showing a rectangle that will never fill.
  *
  * **Notes** is what this panel used to be in full: your own transcript against
  * this video, kept in this browser and sent nowhere, live across your own tabs
@@ -274,9 +289,23 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
   // Confirmed over: YouTube keeps the transcript but takes the composer away,
   // so there is nothing here to sign in *for*.
   const ended = isLive === false;
-  const chatUrl = host ? liveChatUrl(videoId, host) : null;
-  const popoutUrl = liveChatPopoutUrl(videoId);
-  const signInUrl = liveChatSignInUrl(videoId);
+  // The key names its own platform, so the panel never has to be told which
+  // one it is drawing. An unparseable key keeps the YouTube shape it has always
+  // had, and lands in the same "this can't be framed" branch it always did.
+  const source = parseKey(videoId);
+  const twitch = source?.provider === "twitch" ? source : null;
+  const platform = source ? PROVIDER_LABEL[source.provider] : "YouTube";
+  const noun = source ? sourceNoun(source) : "video";
+  /** Twitch keeps chat against a channel and nothing else — see the header. */
+  const noChat = Boolean(twitch && twitch.kind !== "channel");
+  const chatUrl = !host
+    ? null
+    : twitch
+      ? chatFrameUrl(twitch, host)
+      : liveChatUrl(videoId, host);
+  const popoutUrl = twitch ? chatPopoutUrl(twitch) : liveChatPopoutUrl(videoId);
+  // Twitch signs you in inside its own chat frame, so there is nothing to open.
+  const signInUrl = twitch ? null : liveChatSignInUrl(videoId);
   const showReload = canReloadChat(phase);
   const inputBase =
     "border border-edge bg-ink px-3 py-2 font-mono text-[12px] text-bone placeholder:text-faint focus:border-amber focus:outline-none";
@@ -357,9 +386,18 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
       >
         {isLive === undefined && (
           <p className="border-b border-edge-soft px-4 py-2.5 font-mono text-[10px] leading-relaxed text-faint">
-            Liveness unconfirmed — checking it needs a <code>YOUTUBE_API_KEY</code>, so the tally
-            lamp and the viewer count stay dark on this stream. See the README. The chat below is
-            the video&apos;s real one either way.
+            Liveness unconfirmed — checking it needs{" "}
+            {twitch ? (
+              <>
+                a <code>TWITCH_CLIENT_ID</code> and <code>TWITCH_CLIENT_SECRET</code>
+              </>
+            ) : (
+              <>
+                a <code>YOUTUBE_API_KEY</code>
+              </>
+            )}
+            , so the tally lamp and the viewer count stay dark on this stream. See the README. The
+            chat below is the {noun}&apos;s real one either way.
           </p>
         )}
 
@@ -370,18 +408,31 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
             aria-label="Loading live chat"
             className="shimmer m-4 h-[420px] sm:h-[520px]"
           />
+        ) : noChat ? (
+          // Not a failure — Twitch keeps no chat against a VOD or a clip, so
+          // there is nothing here that could have loaded. Said plainly, next to
+          // the tab that does work on one.
+          <div className="m-4 border border-dashed border-edge p-6">
+            <p className="max-w-lg text-sm leading-relaxed text-muted">
+              A Twitch {noun} has no chat of its own — chat belongs to the channel,
+              and only while it is on air. Open the channel on Twitch to join it, or keep your own
+              transcript under <span className="text-bone">Notes</span>.
+            </p>
+          </div>
         ) : chatUrl === null ? (
           <div className="m-4 border border-del/40 bg-del/6 p-6">
             <div className="flex flex-wrap items-center gap-3">
               <span className="border border-del/50 px-1.5 py-0.5 font-mono text-[10px] tracking-[0.16em] text-del uppercase">
                 Failed
               </span>
-              <p className="font-mono text-[11px] text-faint">youtube/chat-unavailable</p>
+              <p className="font-mono text-[11px] text-faint">
+                {twitch ? "twitch" : "youtube"}/chat-unavailable
+              </p>
             </div>
             <p className="mt-4 max-w-lg text-sm leading-relaxed text-muted">
-              This chat can&apos;t be framed here. Either the video id isn&apos;t one YouTube would
-              recognise, or this page is being served from a host YouTube won&apos;t accept as an
-              embed domain.
+              This chat can&apos;t be framed here. Either the {noun} isn&apos;t one {platform} would
+              recognise, or this page is being served from a host{" "}
+              {platform} won&apos;t accept as an embed domain.
             </p>
           </div>
         ) : (
@@ -418,7 +469,20 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
         <div className="border-t border-edge-soft px-4 py-3">
           <div className="flex flex-wrap items-center gap-3">
             <p className="min-w-0 flex-1 font-mono text-[10px] leading-relaxed text-faint">
-              {ended ? (
+              {noChat ? (
+                <>
+                  Chat belongs to the Twitch channel that made this {noun}, and only while it is on
+                  air. Notes below works on it either way.
+                </>
+              ) : twitch ? (
+                <>
+                  Chat comes from Twitch, and it stays open even when the channel is off air —
+                  signing in happens inside the frame, on Twitch&apos;s own origin, so vibers.tv
+                  never sees it. It stays empty if the channel turned chat off, or if your browser
+                  blocks Twitch&apos;s cookies here; Safari does by default, and the pop-out always
+                  works.
+                </>
+              ) : ended ? (
                 <>
                   This broadcast has ended, so its chat is closed to new messages — there is
                   nothing left to sign in for. YouTube still shows the transcript where the
@@ -451,7 +515,7 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
                 rel="noreferrer"
                 className="shrink-0 border border-edge px-3 py-1.5 font-mono text-[10px] tracking-[0.1em] text-teal uppercase transition-colors hover:border-teal"
               >
-                Open chat on YouTube ↗<span className="sr-only"> (opens a new tab)</span>
+                Open chat on {platform} ↗<span className="sr-only"> (opens a new tab)</span>
               </a>
             )}
           </div>
@@ -494,7 +558,7 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
         hidden={tab !== "notes"}
       >
         <p className="border-b border-edge-soft px-4 py-2.5 font-mono text-[10px] leading-relaxed text-faint">
-          Your own notes on this video. vibers.tv has no chat server — these are kept in this
+          Your own notes on this {noun}. vibers.tv has no chat server — these are kept in this
           browser and are not sent anywhere. Your other tabs on this stream see them.
         </p>
 
@@ -509,7 +573,7 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
           {ready && messages.length === 0 && (
             <li className="border border-dashed border-edge p-4 font-mono text-[11px] leading-relaxed text-faint">
               Nothing noted yet.{" "}
-              {live ? "The stream is up — mark the moment." : "Leave the first note on this video."}
+              {live ? "The stream is up — mark the moment." : `Leave the first note on this ${noun}.`}
             </li>
           )}
           {messages.map((m) => (
