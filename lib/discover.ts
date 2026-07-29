@@ -118,22 +118,29 @@ export type Reason = "off" | "no-key" | "quota" | "upstream";
  *
  * Kept here beside `Reason` and not in `lib/twitch-discover.ts` so that the one
  * module which owns the shape of a sourcing result owns both halves of it, and
- * so the panel imports its vocabulary from one place.
+ * so anything reporting a run reads its vocabulary from one place.
  */
 export type TwitchReason = "off" | "no-credentials" | "no-category" | "upstream";
 
 /**
  * One platform's leg of a sourcing run.
  *
- * Symmetrical on purpose. The panel's whole job is to never leave an unexplained
- * gap, and with two platforms that means never letting one platform's failure
- * stand in for the other's result: a spent YouTube search allowance and six live
- * Twitch streams is a good run, and a single collapsed `reason` would report it
- * as a broken one.
+ * Symmetrical on purpose. An empty wall has several quite different causes — a
+ * platform switched off, no key, a spent daily allowance, a misspelled category,
+ * or genuinely nothing on air — and they are not interchangeable. With two
+ * platforms that means never letting one platform's failure stand in for the
+ * other's result: a spent YouTube search allowance alongside six live Twitch
+ * streams is a good run, and a single collapsed `reason` would report it as a
+ * broken one.
+ *
+ * The wall itself no longer narrates any of this — the strip that used to was
+ * removed once sourcing worked without being watched — but the run still answers
+ * with it, because the route's response is what an operator reads when a wall is
+ * empty and nobody can say why.
  *
  * `asked` is what the leg was pointed at — keywords on YouTube, categories on
- * Twitch. Different words for the same idea, so one field rather than two, and
- * the panel labels it per platform.
+ * Twitch. Different words for the same idea, so one field rather than two, named
+ * for what they have in common.
  */
 export interface DiscoverLeg<R> {
   asked: string[];

@@ -6,9 +6,10 @@ import { sourceWatched } from "@/lib/watch-run";
 /**
  * Go and find live streams, and fold what is found into the shared wall.
  *
- * Two ways of finding them, and they answer different questions. Keyword
- * sourcing asks *what is live that matches "live coding"*; the watchlist asks
- * *are the people we named on air*. Both land through `mergeSourced` in one
+ * Three ways of finding them, and they answer different questions. YouTube
+ * sourcing asks *what is live that matches "live coding"*; Twitch sourcing asks
+ * *who is on air in this category*; the watchlist asks *are the people we named
+ * on air*. All of them land through `mergeSourced` in one
  * write — see `lib/watch-run.ts` for why the order of the two lists matters —
  * so a stream someone added by hand is never evicted, a stream anyone threw off
  * never comes back, and sourced entries are capped and swept after a day.
@@ -19,10 +20,12 @@ import { sourceWatched } from "@/lib/watch-run";
  * one row set, so the losing side of a race is a duplicate of the winner
  * rather than a lost update.
  *
- * A run that finds nothing — switched off, no key, quota spent, YouTube
- * unreachable, nobody watched — still answers 200 with its reason. The wall
- * keeps what it has and the panel says why, which is the whole reason `reason`
- * exists.
+ * A run that finds nothing — a platform switched off, no key, YouTube's daily
+ * quota spent, a category Twitch does not recognise, either platform
+ * unreachable, nobody watched — still answers 200, with a reason **per
+ * platform**. The wall keeps what it has either way, and nothing on the page
+ * narrates the reason any more; it is in the response so that an empty wall is
+ * still explainable to whoever has to explain it.
  */
 
 export const revalidate = 0;

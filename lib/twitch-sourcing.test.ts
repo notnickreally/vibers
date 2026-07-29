@@ -17,9 +17,9 @@ import { TWITCH_PAGE } from "./twitch-discover";
  * of the several ways to find nothing each failure is reported as. None of that
  * lives in a pure function, so this file stubs `fetch` and reads the calls back.
  *
- * Every reason on `TwitchReason` is reachable from here, which is the point: the
- * panel promises a visitor an explanation for an empty wall, and an explanation
- * nothing exercises is an explanation that can quietly become wrong.
+ * Every reason on `TwitchReason` is reachable from here, which is the point: a
+ * reason is the only account anyone gets of why a wall is empty, and a reason
+ * nothing exercises is one that can quietly start being the wrong one.
  *
  * The module is re-imported per test. It keeps a memo and a category-id cache at
  * module scope — deliberately, because they are the only thing standing between
@@ -175,7 +175,7 @@ describe("discoverTwitch", () => {
     stubFetch({ streams: { data: [] } });
     const run = await (await fresh())(1_000);
     // No reason: this is a working run whose answer is "nobody", and a reason
-    // here would have the panel explain a failure that did not happen.
+    // here would report a failure that did not happen.
     expect(run.leg).toEqual({ asked: ["Software and Game Development"], found: 0 });
   });
 

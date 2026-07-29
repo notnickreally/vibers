@@ -41,7 +41,7 @@
  * Game Development" is a magic number nobody can check by reading it. So the
  * deployment configures *names* and `/helix/games?name=` turns them into ids —
  * one cheap call, cached. A misspelled name then fails as "Twitch does not know
- * that category", which is a thing the panel can say, instead of a
+ * that category" — a distinct, fixable reason the run can report — instead of a
  * correct-looking request that returns nothing forever.
  */
 
