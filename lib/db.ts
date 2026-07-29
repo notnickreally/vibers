@@ -14,11 +14,13 @@
  * a failed build rather than a failed request. It is built on first use and
  * kept.
  *
- * **The schema is created on first use, not by a migration tool.** There are
- * two tables and no history to migrate; a `CREATE TABLE IF NOT EXISTS` behind
- * a memoized promise is the whole of it, costs one round trip per cold
- * instance, and means a fresh Neon branch (every preview deployment gets one)
- * is usable without a deploy step that could be skipped.
+ * **The schema is created on first use, not by a migration tool.** There is no
+ * history to migrate; a `CREATE TABLE IF NOT EXISTS` behind a memoized promise
+ * is the whole of it, costs one round trip per cold instance, and means a fresh
+ * Neon branch (every preview deployment gets one) is usable without a deploy
+ * step that could be skipped. Every table this app has is created here — a
+ * second module with its own first-use migration would be a second answer to a
+ * question this file already answers.
  *
  * **There is no fallback.** If the database is unreachable the routes fail and
  * the wall says so. Quietly serving an in-memory or per-browser wall instead
@@ -51,7 +53,7 @@ export function db(): NeonQueryFunction<false, false> {
 let schema: Promise<void> | null = null;
 
 /**
- * Make sure the two tables exist. Idempotent, and awaited once per instance.
+ * Make sure the tables exist. Idempotent, and awaited once per instance.
  *
  * The promise is cleared on failure so a cold start that happened to land
  * during a Neon reconnect can try again, rather than caching the rejection and
@@ -95,5 +97,22 @@ async function migrate(): Promise<void> {
   `;
   await sql`
     CREATE INDEX IF NOT EXISTS dismissed_streams_at_idx ON dismissed_streams (dismissed_at DESC)
+  `;
+  // The people allowed to moderate the wall. Three credentials per admin,
+  // hashed the same way, plus the two columns the lockout is computed from.
+  // `handle` is UNIQUE so two spellings of the same operator cannot exist, and
+  // so the lookup every sign-in starts with is an index hit.
+  await sql`
+    CREATE TABLE IF NOT EXISTS admins (
+      id              TEXT PRIMARY KEY,
+      handle          TEXT NOT NULL UNIQUE,
+      passphrase      TEXT NOT NULL,
+      patchbay        TEXT NOT NULL,
+      dial            TEXT NOT NULL,
+      created_at      BIGINT NOT NULL,
+      last_seen_at    BIGINT,
+      failed_attempts INTEGER NOT NULL DEFAULT 0,
+      locked_until    BIGINT NOT NULL DEFAULT 0
+    )
   `;
 }
