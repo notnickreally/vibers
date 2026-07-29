@@ -145,10 +145,14 @@ export async function removeStream(videoId: string): Promise<Stream[]> {
  * write it back, so whichever landed second silently undid the other.
  *
  * Two findings come back from the one call, because they answer different
- * questions and fail for different reasons. `result` is keyword search — what is
- * live that matches "live coding" — which can be switched off or out of quota.
- * `watchlist` is the channels an admin named — are *they* on air — which cannot
- * be out of quota, because reading a channel's newest videos costs nothing.
+ * questions and fail for different reasons. `result` is sourcing, and it carries
+ * a leg per platform: YouTube by keyword — what is live that matches "live
+ * coding" — which can be switched off or out of quota for the day, and Twitch by
+ * category, which can be switched off or pointed at a name Twitch does not know
+ * but cannot run out of anything, because Helix's limit refills every minute.
+ * `watchlist` is the channels an admin named — are *they* on air — which also
+ * cannot be out of quota, because reading a channel's newest videos costs
+ * nothing.
  */
 export interface SourceRun {
   streams: Stream[];

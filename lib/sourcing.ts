@@ -1,5 +1,13 @@
 /**
- * Go and find live coding streams, by keyword.
+ * Go and find live coding streams — the run, on both platforms.
+ *
+ * `discover` is the seam: it asks YouTube and Twitch in parallel and hands back
+ * one merged list with a separate account of what each platform did. The Twitch
+ * half lives in `lib/twitch-sourcing.ts` because the two platforms have almost
+ * nothing in common here — Twitch addresses categories rather than keywords, and
+ * everything `/helix/streams` returns is already confirmed on air, so it needs
+ * neither the confirmation leg nor the quota latch below. Everything from here
+ * down is YouTube's.
  *
  * This is the body `app/api/youtube/discover` used to hold inline, lifted out
  * for the same reason `statuses.ts` was: the wall's own sourcing route runs it
@@ -8,7 +16,8 @@
  * keeping their own would double the spend on a budget that cannot be topped
  * up.
  *
- * Two legs, and the difference between them is the whole design:
+ * Two legs on the YouTube side, and the difference between them is the whole
+ * design:
  *
  * - **`search.list`** finds candidates. It is the expensive one — a hundred
  *   calls a day for the entire Google Cloud project, free and unbuyable — so it
@@ -37,14 +46,19 @@ import "server-only";
 import {
   CONFIRM_TTL,
   DISCOVER_TTL,
+  type DiscoverLeg,
   type DiscoverResult,
+  leg,
   MAX_CANDIDATES,
   MAX_PER_KEYWORD,
   readCandidates,
   readConfirmed,
+  type Reason,
   readReason,
   resolveKeywords,
 } from "./discover";
+import type { Metadata } from "./stream";
+import { discoverTwitch } from "./twitch-sourcing";
 import { chunk, MAX_IDS, parseIds } from "./youtube";
 
 /**
@@ -58,7 +72,12 @@ import { chunk, MAX_IDS, parseIds } from "./youtube";
  * overspend by the number of live instances, rather than by the number of
  * requests it serves.
  */
-let memo: { at: number; result: DiscoverResult } | null = null;
+let memo: { at: number; result: YouTubeDiscovery } | null = null;
+
+interface YouTubeDiscovery {
+  streams: Metadata[];
+  leg: DiscoverLeg<Reason>;
+}
 
 /**
  * Set when the search bucket is spent. It does not refill until midnight
@@ -115,8 +134,8 @@ async function search(keyword: string, key: string): Promise<{ ids: string[]; qu
   }
 }
 
-async function confirm(ids: string[], key: string): Promise<DiscoverResult["streams"]> {
-  const streams: DiscoverResult["streams"] = [];
+async function confirm(ids: string[], key: string): Promise<Metadata[]> {
+  const streams: Metadata[] = [];
   for (const batch of chunk(ids, MAX_IDS)) {
     const params = new URLSearchParams({
       part: "snippet,liveStreamingDetails",
@@ -137,21 +156,21 @@ async function confirm(ids: string[], key: string): Promise<DiscoverResult["stre
 }
 
 /**
- * The candidates that are genuinely on air right now.
+ * The YouTube candidates that are genuinely on air right now.
  *
- * Every path answers with a result and a reason rather than throwing. A wall
- * that cannot discover should keep what it already has and be told why, not be
- * handed an error to render.
+ * Every path answers with a leg and a reason rather than throwing. A wall that
+ * cannot discover should keep what it already has and be told why, not be handed
+ * an error to render.
  */
-export async function discover(now: number): Promise<DiscoverResult> {
-  if (!process.env.YOUTUBE_DISCOVER_ENABLED) return { keywords: [], streams: [], reason: "off" };
+async function discoverYouTube(now: number): Promise<YouTubeDiscovery> {
+  if (!process.env.YOUTUBE_DISCOVER_ENABLED) return { streams: [], leg: leg([], "off") };
 
   const key = process.env.YOUTUBE_API_KEY;
   const keywords = resolveKeywords(process.env.YOUTUBE_DISCOVER_KEYWORDS);
-  if (!key) return { keywords, streams: [], reason: "no-key" };
+  if (!key) return { streams: [], leg: leg(keywords, "no-key") };
 
   if (memo && now - memo.at < DISCOVER_TTL * 1000) return memo.result;
-  if (now < quotaUntil) return { keywords, streams: [], reason: "quota" };
+  if (now < quotaUntil) return { streams: [], leg: leg(keywords, "quota") };
 
   const candidates: string[] = [];
   let quota = false;
@@ -166,7 +185,7 @@ export async function discover(now: number): Promise<DiscoverResult> {
 
   if (quota) {
     quotaUntil = now + msUntilQuotaReset(now);
-    return { keywords, streams: [], reason: "quota" };
+    return { streams: [], leg: leg(keywords, "quota") };
   }
 
   // The ids came off a response rather than out of our own hands, and the next
@@ -174,7 +193,35 @@ export async function discover(now: number): Promise<DiscoverResult> {
   // so they go through the same gate a pasted id would. The cap is passed
   // explicitly: `parseIds` guards what we send, `chunk` sizes what we send it in.
   const ids = parseIds(candidates.join(","), MAX_CANDIDATES);
-  const result: DiscoverResult = { keywords, streams: await confirm(ids, key) };
+  const streams = await confirm(ids, key);
+  const result: YouTubeDiscovery = { streams, leg: { asked: keywords, found: streams.length } };
   memo = { at: now, result };
   return result;
+}
+
+/**
+ * Everything sourcing found this run, on both platforms.
+ *
+ * The two legs are asked **in parallel** because they share nothing at all — a
+ * different key, a different bucket, a different endpoint, a different failure
+ * mode — and running them in series would make the slower one the cost of the
+ * faster one for no benefit. Neither can throw, so there is nothing here for one
+ * to do to the other.
+ *
+ * `streams` comes out merged into the single list `mergeSourced` takes, with
+ * **YouTube first**. That is not cosmetic: `mergeSourced` unshifts, so entries at
+ * the end of the list end up at the front of the sourced run and are the ones
+ * that survive `MAX_SOURCED`. Twitch's leg is capped at `MAX_TWITCH_FOUND` on its
+ * own, so it cannot use that position to crowd YouTube out — the ordering only
+ * decides who yields when both legs have found more than the wall will hold.
+ * (`lib/watch-run.ts` puts this whole list before the watchlist's for the same
+ * reason: a channel somebody named beats anything either leg guessed.)
+ */
+export async function discover(now: number): Promise<DiscoverResult> {
+  const [youtube, twitch] = await Promise.all([discoverYouTube(now), discoverTwitch(now)]);
+  return {
+    streams: [...youtube.streams, ...twitch.streams],
+    youtube: youtube.leg,
+    twitch: twitch.leg,
+  };
 }
