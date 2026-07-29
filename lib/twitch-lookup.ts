@@ -133,54 +133,53 @@ function displayName(title: string | undefined, login: string): string {
  * where a missing id means "we were told nothing". `/helix/streams` returns one
  * row per channel that is on air, so an empty answer for a channel we know
  * exists is a confirmed `isLive: false`.
+ *
+ * Both calls go out **at once**. They ask independent questions — who is this,
+ * and are they on right now — and neither answer feeds the other's request, so
+ * asking in series only added the slower one's latency to the faster one's. The
+ * one thing that has to be true is that a failed `/users` still refuses the
+ * channel, and it does: `users` is resolved and checked before anything is built
+ * out of `streams`.
  */
 async function channelFromHelix(login: string): Promise<Partial<Looked> | null> {
   if (!credentials()) return null;
 
-  const users = await helix<{ data?: HelixUser[] }>(
-    "users",
-    new URLSearchParams({ login }),
-  );
+  const [users, streams] = await Promise.all([
+    helix<{ data?: HelixUser[] }>("users", new URLSearchParams({ login })),
+    helix<{ data?: HelixStream[] }>("streams", new URLSearchParams({ user_login: login })),
+  ]);
+
   // A null here is a failed request, not an empty one — Helix being unreachable
   // must leave the page lookup's answer standing rather than 404 a real channel.
   if (!users) return null;
   const user = users.data?.[0];
   if (!user) throw new LookupError("No such Twitch channel.", 404);
 
-  const streams = await helix<{ data?: HelixStream[] }>(
-    "streams",
-    new URLSearchParams({ user_login: login }),
-  );
+  const name = user.display_name || login;
   if (!streams) {
-    return {
-      title: user.display_name || login,
-      channel: user.display_name || login,
-      description: user.description || undefined,
-    };
+    return { title: name, channel: name, description: user.description || undefined };
   }
 
   const live = streams.data?.[0];
   return {
-    title: live?.title || user.display_name || login,
-    channel: user.display_name || login,
+    title: live?.title || name,
+    channel: name,
     description: user.description || undefined,
     isLive: Boolean(live),
     viewers: live?.viewer_count,
   };
 }
 
-async function lookupChannel(source: TwitchSource): Promise<Looked> {
-  const login = source.id;
-  const tags = await fromPage(twitchWatchUrl(source));
-
-  // The page is the only check available with no credentials, and it is a good
-  // one: Twitch's generic shell is exactly what a nonexistent channel serves.
-  if (tags?.generic && !credentials()) {
-    throw new LookupError("No such Twitch channel.", 404);
-  }
-
-  const name = displayName(tags?.title, login);
-  const base: Looked = {
+/**
+ * What a channel looks like before either source has been asked.
+ *
+ * The name defaults to the login, which is the one thing we already know for
+ * certain and is never a guess: `twitch.tv/theprimeagen` really is addressed by
+ * `theprimeagen`. Everything above this replaces it with what the channel calls
+ * itself.
+ */
+function channelBase(source: TwitchSource, name: string, description?: string): Looked {
+  return {
     videoId: twitchKey(source),
     // With no Helix there is no broadcast title to show, so the card carries
     // the channel's own name rather than a made-up one.
@@ -191,10 +190,50 @@ async function lookupChannel(source: TwitchSource): Promise<Looked> {
     // channel's current frame and it refreshes itself, which is the closest a
     // wall of monitors gets to a monitor.
     thumbnail: twitchPosterUrl(source),
-    description: tags?.description || undefined,
+    description: description || undefined,
   };
+}
 
-  return { ...base, ...(await channelFromHelix(login)) };
+/**
+ * Everything about one channel — Helix first, the public page as the fallback.
+ *
+ * **The order is the point, and it used to be the other way round.** This used to
+ * fetch and scrape the channel's page unconditionally and then let Helix
+ * overwrite nearly all of it, which meant a deployment with credentials paid for
+ * up to 200 KB of single-page-app markup on every lookup to extract two fields
+ * Helix was about to answer better. `/helix/users` carries the display name and
+ * the bio directly, and it is authoritative where `og:title` is a string we
+ * pattern-match a suffix off. So with credentials the page is not fetched at
+ * all.
+ *
+ * Without credentials nothing changes: the page is the only source there is, and
+ * its generic shell is still the only way to tell a real channel from a
+ * nonexistent one. It also remains the fallback when Helix is configured but
+ * unreachable — a `null` from `channelFromHelix` is a failed request, and
+ * falling back to the page is strictly better than 404ing a channel that exists.
+ */
+async function lookupChannel(source: TwitchSource): Promise<Looked> {
+  const login = source.id;
+
+  if (credentials()) {
+    const helixed = await channelFromHelix(login);
+    // A throw has already happened above for a channel Helix says isn't there,
+    // so a null is Helix being unreachable — fall through to the page.
+    if (helixed) return { ...channelBase(source, login), ...helixed };
+  }
+
+  const tags = await fromPage(twitchWatchUrl(source));
+
+  // The page is the only check available with no credentials, and it is a good
+  // one: Twitch's generic shell is exactly what a nonexistent channel serves.
+  // With credentials configured but unreachable it is not a safe refusal — we
+  // may simply be looking at a shell we were served for another reason — so the
+  // 404 stays gated on there being no other source of truth.
+  if (tags?.generic && !credentials()) {
+    throw new LookupError("No such Twitch channel.", 404);
+  }
+
+  return channelBase(source, displayName(tags?.title, login), tags?.description);
 }
 
 async function lookupVideo(source: TwitchSource): Promise<Looked> {
