@@ -115,4 +115,25 @@ async function migrate(): Promise<void> {
       locked_until    BIGINT NOT NULL DEFAULT 0
     )
   `;
+  // The channels the wall keeps an eye on. `key` is `provider:id` — the
+  // watchlist's own namespace, not `lib/source.ts`' stream key — and it is the
+  // primary key so adding the same channel twice is an upsert rather than a
+  // duplicate row that would be swept twice per run.
+  await sql`
+    CREATE TABLE IF NOT EXISTS watched_channels (
+      key          TEXT PRIMARY KEY,
+      provider     TEXT NOT NULL,
+      channel_id   TEXT NOT NULL,
+      name         TEXT NOT NULL,
+      input        TEXT NOT NULL,
+      url          TEXT NOT NULL,
+      added_at     BIGINT NOT NULL,
+      added_by     TEXT,
+      last_live_at BIGINT
+    )
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS watched_channels_added_at_idx
+    ON watched_channels (added_at DESC)
+  `;
 }

@@ -25,6 +25,7 @@
 import { clearMessages } from "./chat";
 import type { DiscoverResult } from "./discover";
 import { parseKey } from "./source";
+import type { WatchlistResult } from "./watch";
 
 export interface Stream {
   /**
@@ -142,11 +143,21 @@ export async function removeStream(videoId: string): Promise<Stream[]> {
  * which is the lost-update problem this used to have, gone. Two tabs doing
  * this at once used to each read the store, merge into their own snapshot and
  * write it back, so whichever landed second silently undid the other.
+ *
+ * Two findings come back from the one call, because they answer different
+ * questions and fail for different reasons. `result` is keyword search — what is
+ * live that matches "live coding" — which can be switched off or out of quota.
+ * `watchlist` is the channels an admin named — are *they* on air — which cannot
+ * be out of quota, because reading a channel's newest videos costs nothing.
  */
-export async function sourceStreams(): Promise<{ streams: Stream[]; result: DiscoverResult }> {
-  return ask<{ streams: Stream[]; result: DiscoverResult }>("/api/streams/source", {
-    method: "POST",
-  });
+export interface SourceRun {
+  streams: Stream[];
+  result: DiscoverResult;
+  watchlist: WatchlistResult;
+}
+
+export async function sourceStreams(): Promise<SourceRun> {
+  return ask<SourceRun>("/api/streams/source", { method: "POST" });
 }
 
 /** Take every sourced stream off at once — again, for everyone — and remember each one. */

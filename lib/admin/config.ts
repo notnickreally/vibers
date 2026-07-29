@@ -76,7 +76,7 @@ export function environmentReadout(): { name: string; set: boolean; why: string 
     {
       name: "YOUTUBE_API_KEY",
       set: has("YOUTUBE_API_KEY"),
-      why: "Liveness refresh and keyword sourcing.",
+      why: "Liveness refresh, keyword sourcing, watched YouTube channels.",
     },
     {
       name: "YOUTUBE_DISCOVER_ENABLED",

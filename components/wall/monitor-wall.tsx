@@ -7,6 +7,7 @@ import { AutoSource } from "@/components/wall/auto-source";
 import { EmptyState, WallSkeleton } from "@/components/states";
 import { LiveBadge } from "@/components/ui/bits";
 import type { DiscoverResult } from "@/lib/discover";
+import type { WatchlistResult } from "@/lib/watch";
 import { compact } from "@/lib/format";
 import { YT_CHROME_MS } from "@/lib/player-time";
 import { embedFor, parseKey, watchHref } from "@/lib/source";
@@ -64,6 +65,7 @@ export function MonitorWall() {
   const [tab, setTab] = useState<Shelf>("live");
   const [sourcing, setSourcing] = useState<"idle" | "sourcing" | "done">("idle");
   const [sourced, setSourced] = useState<DiscoverResult | null>(null);
+  const [watchlist, setWatchlist] = useState<WatchlistResult | null>(null);
   const [error, setError] = useState("");
   // Once someone has picked a tab, the refresh landing must not pull it back.
   const touchedRef = useRef(false);
@@ -99,6 +101,7 @@ export function MonitorWall() {
         if (cancelled || !found) return;
         land(found.streams);
         setSourced(found.result);
+        setWatchlist(found.watchlist);
         setSourcing("done");
       })
       .catch((err: unknown) => {
@@ -173,6 +176,7 @@ export function MonitorWall() {
       <AutoSource
         state={sourcing}
         result={sourced}
+        watchlist={watchlist}
         count={sourcedCount}
         onClear={() => write(clearSourced)}
       />

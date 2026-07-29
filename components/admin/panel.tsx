@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useCallback, useState } from "react";
+import { Watchlist } from "@/components/admin/watchlist";
 import { LiveBadge } from "@/components/ui/bits";
 import { compact } from "@/lib/format";
 import type { Stream } from "@/lib/stream";
+import type { Watched } from "@/lib/watch";
 
 /**
  * The panel itself — the wall, with the moderation it has never had.
@@ -15,6 +17,10 @@ import type { Stream } from "@/lib/stream";
  * open, deliberately, because the wall is meant to be everybody's. What it adds
  * is a place where the same three actions happen behind a sign-in, so an
  * operator clearing up after a bad sourcing run is doing it as somebody.
+ *
+ * It is also the only surface for the watchlist, which is not a moderation tool
+ * but belongs here for the same reason: naming the channels the wall watches is
+ * a standing decision about what everyone sees, so it is made by somebody.
  *
  * Every action here re-authorizes on the server. This component being on screen
  * proves nothing to `/api/admin/streams`, which checks the cookie itself.
@@ -32,6 +38,7 @@ export interface PanelData {
   dismissed: number;
   environment: Readout[];
   admins: { handle: string; createdAt: number }[];
+  watchlist: Watched[];
 }
 
 /** Deterministic, and UTC — a locale-formatted date would differ across hydration. */
@@ -205,6 +212,10 @@ export function Panel({ initial }: { initial: PanelData }) {
           </ul>
         )}
       </section>
+
+      {/* Its own state, its own routes, its own errors — the wall list above
+          only hears about it when a sweep actually changes the wall. */}
+      <Watchlist initial={initial.watchlist} onStreams={setStreams} />
 
       <section className="grid gap-8 sm:grid-cols-2">
         <div>
