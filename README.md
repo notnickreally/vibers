@@ -297,6 +297,19 @@ read-out of which environment variables this deployment has — booleans only,
 because a panel that printed an API key to help you debug it would be the leak
 it was meant to prevent.
 
+**It checks itself every five minutes.** Both of those checks used to be
+buttons, which meant a panel left open on a screen showed whatever was true when
+it loaded — the one thing a board of live streams cannot afford. Now one cycle
+runs on its own: sweep the watched channels, then re-ask liveness for every URL
+on the wall, then refresh the page behind both so the counts, the roster and the
+environment read-out are as current as the lists. It is the same two calls the
+buttons send, so the automatic path and the manual one can't disagree. The cycle
+has a second trigger: **adding a watched username runs it immediately**, because
+a name typed in is a name somebody wants an answer about now, not at the next
+tick — and a run restarts the clock, so the two triggers never stack. A line
+under the wall says when the last cycle ran and what it checked; an automatic
+thing with no moment needs one.
+
 Getting in takes three layers, and two of them are not passwords:
 
 1. **The Slate** — a handle and a passphrase, drawn as a clapperboard. This is
