@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Watchlist } from "@/components/admin/watchlist";
 import { LiveBadge } from "@/components/ui/bits";
+import { cycleNote, failedNote, RECHECK_LABEL, RECHECK_MS } from "@/lib/admin/recheck";
 import { compact } from "@/lib/format";
 import type { Stream } from "@/lib/stream";
 import type { Watched } from "@/lib/watch";
@@ -24,6 +26,16 @@ import type { Watched } from "@/lib/watch";
  *
  * Every action here re-authorizes on the server. This component being on screen
  * proves nothing to `/api/admin/streams`, which checks the cookie itself.
+ *
+ * **It also keeps its own clock.** Both checks the panel can do were buttons,
+ * which meant a panel left open showed whatever was true when it loaded — the
+ * one thing a wall of live streams cannot afford. So the same two calls run
+ * themselves every five minutes, in one cycle, and the page refreshes behind
+ * them so the counts, the roster and the environment readout are as current as
+ * the lists. The cycle has two triggers and one body: the timer, and adding a
+ * watched username — because the answer to "is that channel on air" is
+ * interesting *now*, not at the next boundary. A run restarts the clock, so the
+ * two triggers cannot stack.
  */
 
 export interface Readout {
@@ -46,11 +58,44 @@ function day(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+interface Leg {
+  streams?: Stream[];
+  watchlist?: Watched[];
+  result?: { found?: number };
+}
+
+/**
+ * One leg of the automatic cycle.
+ *
+ * Deliberately not `act` below: that one owns the busy state, which disables
+ * every button on the panel. A check nobody asked for must not take the
+ * controls away from the person who is here — it just updates what it can and
+ * says so. `null` means "trust nothing after this".
+ */
+async function leg(path: string, method: string): Promise<Leg | null> {
+  const response = await fetch(path, { method });
+  // Same reading as everywhere else here: a 401 means the session went away
+  // underneath us, and the gate is the only useful place to be.
+  if (response.status === 401) {
+    window.location.assign("/admin/login");
+    return null;
+  }
+  if (!response.ok) return null;
+  return (await response.json().catch(() => null)) as Leg | null;
+}
+
 export function Panel({ initial }: { initial: PanelData }) {
   const [streams, setStreams] = useState(initial.streams);
+  const [watchlist, setWatchlist] = useState(initial.watchlist);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checked, setChecked] = useState<string | null>(null);
+  /** When the last cycle *finished*. The timer counts from here, not from mount. */
+  const [ranAt, setRanAt] = useState<number | null>(null);
+  const running = useRef(false);
+  const router = useRouter();
 
   const act = useCallback(
     async (label: string, init: RequestInit & { query?: string }, done: string) => {
@@ -84,6 +129,74 @@ export function Panel({ initial }: { initial: PanelData }) {
     },
     [],
   );
+
+  /**
+   * The cycle. Sweep the watched channels, re-ask liveness for every URL on
+   * the wall, refresh the page behind both.
+   *
+   * The order is the point. A sweep can put a stream up, so running it first
+   * means the liveness pass behind it covers what was just added instead of
+   * leaving it unconfirmed for five minutes. Neither call is new — they are
+   * exactly what **Check now** and **Re-ask liveness** have always sent, which
+   * is what keeps the automatic path and the manual one from disagreeing.
+   */
+  const recheck = useCallback(async () => {
+    // Two triggers, one body. A cycle already in flight wins; the one that
+    // arrives on top of it drops rather than doubling every request.
+    if (running.current) return;
+    running.current = true;
+    setChecking(true);
+    try {
+      const sweep = await leg("/api/admin/watchlist", "PUT");
+      if (!sweep) {
+        setChecked(failedNote(Date.now()));
+        return;
+      }
+      if (sweep.watchlist) setWatchlist(sweep.watchlist);
+      if (sweep.streams) setStreams(sweep.streams);
+
+      const pass = await leg("/api/admin/streams", "POST");
+      if (!pass) {
+        setChecked(failedNote(Date.now()));
+        return;
+      }
+      const checkedStreams = pass.streams ?? sweep.streams ?? [];
+      setStreams(checkedStreams);
+      setChecked(
+        cycleNote({
+          urls: checkedStreams.length,
+          found: sweep.result?.found ?? 0,
+          at: Date.now(),
+        }),
+      );
+
+      // The page itself, and not only the two lists it holds in state: the
+      // counts below, the roster and the environment readout are rendered on
+      // the server, so a refresh is the only thing that makes them as current
+      // as everything this cycle just fetched.
+      router.refresh();
+    } catch {
+      setChecked(failedNote(Date.now()));
+    } finally {
+      running.current = false;
+      setChecking(false);
+      setRanAt(Date.now());
+    }
+  }, [router]);
+
+  // The clock. It counts from the end of the last cycle rather than from a
+  // fixed drumbeat, which is what stops a run somebody triggered — by adding a
+  // username — from being followed seconds later by the interval's own.
+  useEffect(() => {
+    const since = ranAt === null ? 0 : Date.now() - ranAt;
+    const timer = window.setTimeout(
+      () => {
+        void recheck();
+      },
+      Math.max(0, RECHECK_MS - since),
+    );
+    return () => window.clearTimeout(timer);
+  }, [recheck, ranAt]);
 
   const live = streams.filter((s) => s.isLive === true).length;
   const sourced = streams.filter((s) => s.sourcedAt !== undefined).length;
@@ -153,6 +266,17 @@ export function Panel({ initial }: { initial: PanelData }) {
           {error && <p className="font-mono text-[12px] text-del">{error}</p>}
           {note && !error && <p className="font-mono text-[12px] text-teal">{note}</p>}
         </div>
+
+        {/* The only evidence the automatic cycle leaves. Without a line saying
+            when it last ran, "it checks itself" is something you take on
+            faith — and this panel's whole argument is against doing that. */}
+        <p aria-live="polite" className="font-mono text-[11px] text-faint">
+          {checking
+            ? "Checking every URL now…"
+            : checked
+              ? `${checked} · again in ${RECHECK_LABEL}`
+              : `Every URL here is re-checked every ${RECHECK_LABEL}, and adding a watched channel checks straight away.`}
+        </p>
       </section>
 
       <section>
@@ -213,9 +337,17 @@ export function Panel({ initial }: { initial: PanelData }) {
         )}
       </section>
 
-      {/* Its own state, its own routes, its own errors — the wall list above
-          only hears about it when a sweep actually changes the wall. */}
-      <Watchlist initial={initial.watchlist} onStreams={setStreams} />
+      {/* Its own routes and its own errors, but not its own copy of the list:
+          the cycle above sweeps the watchlist too, and a section that kept a
+          private copy would show a stale "last on air" every time it did.
+          `onAdded` is the second trigger — a username going on is a question
+          worth asking the platforms immediately. */}
+      <Watchlist
+        watchlist={watchlist}
+        onWatchlist={setWatchlist}
+        onStreams={setStreams}
+        onAdded={recheck}
+      />
 
       <section className="grid gap-8 sm:grid-cols-2">
         <div>

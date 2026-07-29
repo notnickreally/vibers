@@ -28,6 +28,10 @@ import {
  *   every visitor's page load already runs. It exists so an operator can watch
  *   the automatic thing happen instead of taking it on faith — which is the
  *   only honest way to demonstrate something that otherwise has no moment.
+ * - **Adding presses it for you.** A name typed in is nearly always a name
+ *   somebody wants an answer about now, so a successful add runs the panel's
+ *   check immediately rather than leaving the channel unasked-about until the
+ *   next five-minute tick.
  *
  * Every action here re-authorizes on the server. This component being on screen
  * proves nothing to `/api/admin/watchlist`, which checks the cookie itself.
@@ -56,14 +60,19 @@ interface Answer {
 }
 
 export function Watchlist({
-  initial,
+  watchlist,
+  onWatchlist,
   onStreams,
+  onAdded,
 }: {
-  initial: Watched[];
+  /** Held by the panel, because its five-minute cycle sweeps this list too. */
+  watchlist: Watched[];
+  onWatchlist: (watchlist: Watched[]) => void;
   /** A sweep writes to the wall, so the list above this one is stale until told. */
   onStreams: (streams: Stream[]) => void;
+  /** A username going on the list is asked about now, not at the next tick. */
+  onAdded: () => void;
 }) {
-  const [watchlist, setWatchlist] = useState(initial);
   const [input, setInput] = useState("");
   const [provider, setProvider] = useState<WatchProvider>("youtube");
   const [busy, setBusy] = useState<string | null>(null);
@@ -89,7 +98,7 @@ export function Watchlist({
           setError(data.error ?? "That didn't work.");
           return null;
         }
-        if (data.watchlist) setWatchlist(data.watchlist);
+        if (data.watchlist) onWatchlist(data.watchlist);
         return data;
       } catch {
         setError("Couldn't reach the server.");
@@ -98,7 +107,7 @@ export function Watchlist({
         setBusy(null);
       }
     },
-    [],
+    [onWatchlist],
   );
 
   const add = useCallback(
@@ -118,8 +127,13 @@ export function Watchlist({
           ? `Watching ${data.watchlist.length} of ${MAX_WATCHED}.`
           : "Added.",
       );
+      // The whole reason to watch a channel is the moment it goes on air, and
+      // a name typed in now is most likely a name somebody is watching now. So
+      // the add itself asks — the panel's cycle, run early rather than waited
+      // for, which also puts the channel up if it happens to be live.
+      onAdded();
     },
-    [act, input, provider],
+    [act, input, provider, onAdded],
   );
 
   const check = useCallback(async () => {
