@@ -38,9 +38,19 @@ export interface SourcedRun {
  * that survive `MAX_SOURCED`. Watched channels are somebody's explicit choice
  * and keyword finds are a guess, so when there is not room for both, the choice
  * wins.
+ *
+ * `fresh` is the one thing the two callers do differ on, and it is the only
+ * thing they may: a visitor's page load reads YouTube through the shared cache,
+ * and a run somebody pressed a button for goes past it. Everything after the
+ * sweep — the merge, the wall, `noteLive` — is identical either way, which is
+ * what keeps the two surfaces agreeing about what "watched" means.
  */
-export async function sourceWatched(also: Metadata[], now: number): Promise<SourcedRun> {
-  const sweep = await sweepWatchlist(await listWatched());
+export async function sourceWatched(
+  also: Metadata[],
+  now: number,
+  fresh = false,
+): Promise<SourcedRun> {
+  const sweep = await sweepWatchlist(await listWatched(), fresh);
   const streams = await wall.applySourced([...also, ...sweep.streams], now);
   // Only for the panel to render — nothing branches on it. Written after the
   // wall, because a failure here must not cost the streams we just put up.
