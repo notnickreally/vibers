@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SiteIcon } from "@/components/admin/site-icon";
 import { Watchlist } from "@/components/admin/watchlist";
 import { LiveBadge } from "@/components/ui/bits";
 import { cycleNote, failedNote, RECHECK_LABEL, RECHECK_MS } from "@/lib/admin/recheck";
 import { compact } from "@/lib/format";
+import type { IconSummary } from "@/lib/icon";
 import type { Stream } from "@/lib/stream";
 import type { Watched } from "@/lib/watch";
 
@@ -20,9 +22,11 @@ import type { Watched } from "@/lib/watch";
  * is a place where the same three actions happen behind a sign-in, so an
  * operator clearing up after a bad sourcing run is doing it as somebody.
  *
- * It is also the only surface for the watchlist, which is not a moderation tool
- * but belongs here for the same reason: naming the channels the wall watches is
- * a standing decision about what everyone sees, so it is made by somebody.
+ * It is also the only surface for the watchlist and for the site's favicon,
+ * neither of which is a moderation tool but both of which belong here for the
+ * same reason: naming the channels the wall watches, and choosing the face
+ * every tab wears, are standing decisions about what everyone sees, so they are
+ * made by somebody.
  *
  * Every action here re-authorizes on the server. This component being on screen
  * proves nothing to `/api/admin/streams`, which checks the cookie itself.
@@ -51,6 +55,8 @@ export interface PanelData {
   environment: Readout[];
   admins: { handle: string; createdAt: number }[];
   watchlist: Watched[];
+  /** The favicon everyone sees. `null` is the one this build ships with. */
+  icon: IconSummary | null;
 }
 
 /** Deterministic, and UTC — a locale-formatted date would differ across hydration. */
@@ -348,6 +354,12 @@ export function Panel({ initial }: { initial: PanelData }) {
         onStreams={setStreams}
         onAdded={recheck}
       />
+
+      {/* Outside the cycle above, deliberately: the favicon is not something
+          that changes underneath the panel every five minutes, and re-fetching
+          a picture nobody touched would be noise. It carries its own state
+          from the moment it is saved. */}
+      <SiteIcon initial={initial.icon} />
 
       <section className="grid gap-8 sm:grid-cols-2">
         <div>
