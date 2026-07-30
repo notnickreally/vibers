@@ -227,9 +227,11 @@ describe("the wall's default view", () => {
     expect(MODES).toContain(DEFAULT_MODE);
   });
 
-  // Both modes stay reachable — making monitors the default is a change of
-  // starting point, not the removal of the cheap view.
-  it("keeps both modes on the toggle", () => {
+  // The toggle these two were written for is gone — the wall is monitors, and
+  // there is no second position to flip to. Posters survives as a way a tile
+  // can draw (ended broadcasts, warming-up frames), not as a mode anyone picks,
+  // so the list keeps both names and the wall keeps exactly one of them.
+  it("still names both ways a tile can draw", () => {
     expect(MODES).toEqual(["posters", "monitors"]);
   });
 });
