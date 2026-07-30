@@ -34,7 +34,16 @@ import {
 import { liveChatPopoutUrl, liveChatSignInUrl, liveChatUrl } from "@/lib/youtube";
 
 /**
- * The chat under the picture — two tabs over the same panel.
+ * The chat beside the picture — two tabs over the same panel.
+ *
+ * **Beside it where there is room, under it where there isn't.** The watch page
+ * places this panel, not the panel itself: `WatchView` moves it between the
+ * left-hand column and the row under the stream by grid placement alone, so it
+ * is the same element at every width and the frame below never remounts. All
+ * this file knows is that its section may be handed a height — the grid stretches
+ * it to the stream's — and when it is, the frame takes whatever the tab strip and
+ * the notice under it leave. Under the picture it keeps its own fixed height,
+ * because there is nothing there to line up with.
  *
  * **Live chat** is the stream's real one, carried in YouTube's own framable
  * `live_chat` document. No API key and no quota: the frame does its own
@@ -309,6 +318,18 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
   const showReload = canReloadChat(phase);
   const inputBase =
     "border border-edge bg-ink px-3 py-2 font-mono text-[12px] text-bone placeholder:text-faint focus:border-amber focus:outline-none";
+  /**
+   * How the panel fills a column beside the stream.
+   *
+   * Only ever applied to the tab that is **open**. A `hidden` element is hidden
+   * by a UA rule, and any author `display` — `flex` included — beats it, so
+   * putting this on a closed tabpanel would show both at once at `2xl`. Below
+   * that breakpoint it does nothing: the panel is under the picture, sized by
+   * its own contents.
+   */
+  const fillColumn = "2xl:flex 2xl:min-h-0 2xl:flex-1 2xl:flex-col";
+  /** And what the frame does with the room that leaves it. */
+  const fillFrame = "2xl:h-auto 2xl:min-h-[360px] 2xl:flex-1";
   const tabBase =
     "border-b-2 px-1 pb-2 font-mono text-[11px] tracking-[0.12em] uppercase transition-colors";
 
@@ -321,7 +342,18 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
   return (
     <section
       aria-labelledby="chat-heading"
-      className="mt-8 border border-edge-soft bg-ink-2"
+      // No top margin: the panel is a region of the watch page's grid now, and
+      // the gap between the rows is what used to be this margin. Beside the
+      // stream there is nothing above it to be pushed away from.
+      //
+      // `@container` is here for the rows *inside* the panel, which have two
+      // very different widths to survive: ~340px in the left-hand column and
+      // most of the page underneath. A viewport query can't tell those apart —
+      // both happen at 1536px and up — so they ask the panel instead. It is safe
+      // to make this a query container precisely because the player is not in
+      // it: `container-type` makes an element the containing block for fixed
+      // descendants, which is how you break a fullscreen video.
+      className="@container border border-edge-soft bg-ink-2 2xl:flex 2xl:h-full 2xl:flex-col"
       data-live={live ? "true" : "false"}
     >
       {/* The section still needs a name, but the tabs now carry the visible
@@ -331,7 +363,7 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
         Chat
       </h2>
 
-      <div className="flex flex-wrap items-center gap-5 border-b border-edge-soft px-4 pt-3">
+      <div className="flex flex-wrap items-center gap-5 border-b border-edge-soft px-4 pt-3 2xl:shrink-0">
         <div role="tablist" aria-labelledby="chat-heading" className="flex items-center gap-5">
           {TABS.map((name, i) => (
             <button
@@ -383,6 +415,7 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
         // No tabIndex: a tabpanel only needs its own tab stop when it holds
         // nothing focusable, and this one always ends in the YouTube link.
         hidden={tab !== "live"}
+        className={tab === "live" ? fillColumn : undefined}
       >
         {isLive === undefined && (
           <p className="border-b border-edge-soft px-4 py-2.5 font-mono text-[10px] leading-relaxed text-faint">
@@ -406,7 +439,7 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
             role="status"
             aria-busy="true"
             aria-label="Loading live chat"
-            className="shimmer m-4 h-[420px] sm:h-[520px]"
+            className={`shimmer m-4 h-[420px] sm:h-[520px] ${fillFrame}`}
           />
         ) : noChat ? (
           // Not a failure — Twitch keeps no chat against a VOD or a clip, so
@@ -454,7 +487,7 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
             // YouTube gets an opaque origin and can't read its own cookies, and
             // with it a sandbox buys nothing across origins.
             referrerPolicy="strict-origin-when-cross-origin"
-            className="block h-[420px] w-full border-0 sm:h-[520px]"
+            className={`block h-[420px] w-full border-0 sm:h-[520px] ${fillFrame}`}
           />
         )}
 
@@ -466,9 +499,11 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
             than a fallback: it needs no JavaScript, a popup blocker cannot stop
             it, and it is where the blocked state sends people. The button above
             it is the enhancement — same destination, one fewer sign-in click. */}
-        <div className="border-t border-edge-soft px-4 py-3">
+        <div className="border-t border-edge-soft px-4 py-3 2xl:shrink-0">
           <div className="flex flex-wrap items-center gap-3">
-            <p className="min-w-0 flex-1 font-mono text-[10px] leading-relaxed text-faint">
+            {/* In a narrow panel the notice takes its own line rather than
+                being squeezed into a gutter beside the buttons. */}
+            <p className="min-w-0 flex-1 font-mono text-[10px] leading-relaxed text-faint @max-[480px]:basis-full">
               {noChat ? (
                 <>
                   Chat belongs to the Twitch channel that made this {noun}, and only while it is on
@@ -529,7 +564,7 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
             <p
               role="status"
               aria-live="polite"
-              className={`min-w-0 flex-1 font-mono text-[10px] leading-relaxed ${
+              className={`min-w-0 flex-1 font-mono text-[10px] leading-relaxed @max-[480px]:basis-full ${
                 phase === "blocked" ? "text-del" : "text-amber"
               }`}
             >
@@ -556,8 +591,9 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
         aria-labelledby="chat-tab-notes"
         // Same as the live panel — the composer is the focusable content.
         hidden={tab !== "notes"}
+        className={tab === "notes" ? fillColumn : undefined}
       >
-        <p className="border-b border-edge-soft px-4 py-2.5 font-mono text-[10px] leading-relaxed text-faint">
+        <p className="border-b border-edge-soft px-4 py-2.5 font-mono text-[10px] leading-relaxed text-faint 2xl:shrink-0">
           Your own notes on this {noun}. vibers.tv has no chat server — these are kept in this
           browser and are not sent anywhere. Your other tabs on this stream see them.
         </p>
@@ -568,7 +604,9 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
           // A log rather than a live region over the whole list: only appends
           // are announced, so a reload doesn't read the transcript back out.
           aria-live="polite"
-          className="max-h-[380px] min-h-[140px] space-y-3 overflow-y-auto px-4 py-4"
+          // Beside the stream the transcript takes the column instead of a
+          // capped 380px of it — same scroll, more of it visible.
+          className="max-h-[380px] min-h-[140px] space-y-3 overflow-y-auto px-4 py-4 2xl:max-h-none 2xl:min-h-0 2xl:flex-1"
         >
           {ready && messages.length === 0 && (
             <li className="border border-dashed border-edge p-4 font-mono text-[11px] leading-relaxed text-faint">
@@ -591,7 +629,7 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
           ))}
         </ol>
 
-        <form onSubmit={onSubmit} className="border-t border-edge-soft px-4 py-3">
+        <form onSubmit={onSubmit} className="border-t border-edge-soft px-4 py-3 2xl:shrink-0">
           <div className="flex flex-wrap items-center gap-2">
             <label htmlFor="chat-handle" className="sr-only">
               Your handle
@@ -602,7 +640,8 @@ export function LiveChat({ videoId, isLive }: { videoId: string; isLive?: boolea
               maxLength={MAX_HANDLE}
               onChange={(e) => setHandle(e.target.value)}
               onBlur={() => saveHandle(handle)}
-              className={`${inputBase} w-32 shrink-0 text-teal`}
+              // Its own line in a narrow panel, so the note keeps a usable one.
+              className={`${inputBase} w-32 shrink-0 text-teal @max-[480px]:w-full`}
               placeholder="handle"
             />
             <label htmlFor="chat-body" className="sr-only">

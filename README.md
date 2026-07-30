@@ -54,7 +54,7 @@ underneath — play/pause, mute, volume, fullscreen, and a *jump to live* button
 that only appears on streams confirmed live. Space and `M` work as shortcuts.
 The title, channel and description sit under the picture.
 
-**Chat.** Under the picture, in two tabs. **Live chat** is the stream's real
+**Chat.** Beside the picture, in two tabs. **Live chat** is the stream's real
 one, carried in YouTube's own embedded `live_chat` frame — no API key, no
 quota, and vibers.tv never holds a message. Reading needs no account. **Notes**
 is your own transcript against the video, kept in this browser and sent nowhere,
@@ -62,6 +62,17 @@ live across your own tabs. It's what works on a VOD, where there is no chat to
 carry. A Twitch channel brings its own chat into the same tab, with its own
 sign-in inside the frame — and none of the window dance below, which is Google's
 problem rather than a general one.
+
+**Where the chat sits is a question about room.** Given room it takes the column
+to the **left** of the picture and runs the full height of it; where there is no
+room it drops back **under** the picture, which is where it has always been. The
+page is capped at 1600px like every other page here, so the left column only
+fits from 1536px up — a 340px chat plus the wall's 320px rail still leave the
+picture ~810px there, and below it they wouldn't. The switch is grid placement
+and nothing else: the panel is the same element on both sides, moved between two
+grid areas, because re-parenting it would remount the `live_chat` frame and drop
+whatever session it had signed into. Nothing is measured, so the first paint is
+already right, before any JavaScript runs.
 
 **Posting.** *Sign in to post* opens a real window on YouTube's own
 `/signin?next=…` redirector, landing you in that stream's pop-out chat with a
@@ -225,7 +236,7 @@ before anyone judges it.
 | Route | What's there |
 | --- | --- |
 | `/` | The wall — add streams, posters/monitors view, grid sizing |
-| `/watch/[id]` | One stream on the clean player, with title, channel, description, and the chat panel |
+| `/watch/[id]` | One stream on the clean player, with title, channel, description, and the chat panel — left of the picture where there's room, under it where there isn't |
 | `/report` | Takedown path for a creator |
 | `/api/lookup?v=` | Metadata lookup for either platform — takes a pasted link or a stored key |
 | `/api/youtube?v=` | The YouTube-only lookup (oEmbed, plus Data API when a key is set) |
