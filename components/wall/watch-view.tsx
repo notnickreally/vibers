@@ -6,14 +6,9 @@ import { LiveChat } from "@/components/chat/live-chat";
 import { CleanPlayer } from "@/components/player/clean-player";
 import { TwitchPlayer } from "@/components/player/twitch-player";
 import { ErrorState } from "@/components/states";
+import { StreamWheel } from "@/components/wall/stream-wheel";
 import { compact } from "@/lib/format";
-import {
-  parseKey,
-  PROVIDER_LABEL,
-  sourceNoun,
-  watchHref,
-  watchLinkUrl,
-} from "@/lib/source";
+import { parseKey, PROVIDER_LABEL, sourceNoun, watchLinkUrl } from "@/lib/source";
 import { addStream, listStreams, lookup, type Stream } from "@/lib/stream";
 import { safeHttpUrl } from "@/lib/youtube";
 
@@ -217,41 +212,29 @@ export function WatchView({ videoId }: { videoId: string }) {
         <LiveChat videoId={videoId} isLive={stream?.isLive} />
       </div>
 
-      {/* The rest of the wall, so you can hop between streams. */}
-      <aside className="min-w-0">
-        <p className="eyebrow mb-3">Also on the wall</p>
+      {/* The rest of the wall, so you can hop between streams — a wheel with its
+          own axle rather than a list in the page's scroll. Beside the picture it
+          is pinned and height-bounded, and that is what keeps the stream you
+          came for on screen: the wheel turns inside these bounds, and the page
+          underneath it doesn't move.
+
+          Two classes here are load-bearing rather than decorative. `self-start`
+          is what makes `sticky` mean anything at all — a grid item stretches to
+          its row by default, and something already as tall as its containing
+          block has nowhere to stick. And `top` clears the site header, which is
+          itself sticky at `h-14`; without that the wall pins underneath it. */}
+      <aside className="min-w-0 xl:sticky xl:top-[4.25rem] xl:flex xl:max-h-[calc(100vh-5.5rem)] xl:flex-col xl:self-start">
+        <p className="eyebrow mb-3 shrink-0">Also on the wall</p>
         {others.length === 0 ? (
           <p className="border border-dashed border-edge p-4 font-mono text-[11px] leading-relaxed text-faint">
             Nothing else up yet. Add more streams and they&apos;ll queue here.
           </p>
         ) : (
-          <ul className="space-y-3">
-            {others.map((s) => (
-              <li key={s.videoId}>
-                <Link href={watchHref(s.videoId)} className="group flex gap-3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={s.thumbnail}
-                    alt=""
-                    loading="lazy"
-                    className="h-14 w-24 shrink-0 border border-edge-soft object-cover"
-                  />
-                  <span className="min-w-0">
-                    <span className="line-clamp-2 block text-[13px] leading-snug text-bone group-hover:text-amber">
-                      {s.title}
-                    </span>
-                    <span className="mt-0.5 block truncate font-mono text-[10px] text-faint">
-                      {s.channel}
-                    </span>
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+          <StreamWheel streams={others} />
         )}
         <Link
           href="/"
-          className="mt-4 block border border-edge px-3 py-2 text-center font-mono text-[10px] tracking-[0.12em] text-muted uppercase transition-colors hover:border-amber hover:text-amber"
+          className="mt-4 block shrink-0 border border-edge px-3 py-2 text-center font-mono text-[10px] tracking-[0.12em] text-muted uppercase transition-colors hover:border-amber hover:text-amber"
         >
           Back to the wall
         </Link>

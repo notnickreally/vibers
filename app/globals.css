@@ -390,6 +390,77 @@
     }
   }
 
+  /* ---- The side wall's wheel ----------------------------------------------
+     The strip of everyone else's streams beside a playing one. It turns on its
+     own axle rather than riding the page's scroll, which is the whole point:
+     before this, scrolling the wall scrolled the page, and far enough down it
+     the stream you were watching had left the screen.
+
+     Where a tile sits on the drum — how far it has turned, how deep that puts
+     it, how much light reaches it — is `lib/wheel.ts`, written per frame as an
+     inline transform by `components/wall/stream-wheel.tsx`. What lives here is
+     the stage it turns on: one vanishing point for the whole wheel, a rim that
+     leaves rather than stops, and the detent under the tile at the axle.
+
+     `data-turning` is set by the component and only while the wall is long
+     enough to actually scroll. Nothing here fires on a wall that fits. */
+  .stream-wheel {
+    overflow-y: auto;
+    overflow-x: hidden;
+    /* The vanishing point belongs to the wheel, not to each tile: on the
+       container every tile converges on the same point, which is what makes the
+       column read as one curved surface instead of a stack of tilted cards.
+       It sits at the middle of this box and stays there while the content
+       scrolls past it — the viewer doesn't move, the drum does. */
+    perspective: 900px;
+    perspective-origin: 50% 50%;
+    /* Proximity, not mandatory: the wheel finds a detent when you let go near
+       one, and otherwise stays out of the way of a long scroll. */
+    scroll-snap-type: y proximity;
+  }
+
+  /* The perspective above applies to the wheel's *children*; the tiles are its
+     grandchildren, so the track has to pass it through rather than flatten it. */
+  .stream-wheel-track {
+    transform-style: preserve-3d;
+    /* A little air at each end so the first and last tiles are on the drum
+       rather than jammed against the rim they started at. Deliberately not half
+       the wheel's height — that is how a picker centres its first row, and it
+       would bury the likeliest target behind a screen of nothing. */
+    padding-block: 1.75rem;
+  }
+
+  .stream-wheel-cell {
+    transform-style: preserve-3d;
+    transform-origin: 50% 50%;
+    scroll-snap-align: center;
+  }
+
+  .stream-wheel-cell + .stream-wheel-cell {
+    margin-top: 0.75rem;
+  }
+
+  /* The rim doesn't stop, it leaves. A hard edge across a curved surface reads
+     as a crop; this reads as the far side of the barrel. Only while it turns —
+     on a wall that fits, this would be dimming tiles for no reason. */
+  .stream-wheel[data-turning="true"] {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 11%,
+      #000 89%,
+      transparent 100%
+    );
+    mask-image: linear-gradient(to bottom, transparent 0, #000 11%, #000 89%, transparent 100%);
+  }
+
+  /* The tile at the axle — the one the wheel is pointing at. A hairline of
+     amber on its poster, which is the same "this one" the wall's tiles already
+     say on hover. Not tally red: nothing here is a statement about being live. */
+  .stream-wheel-cell[data-hub="true"] img {
+    border-color: color-mix(in oklab, var(--color-amber) 45%, transparent);
+  }
+
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: var(--color-edge) transparent;
