@@ -4,13 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SiteIcon } from "@/components/admin/site-icon";
-import { Watchlist } from "@/components/admin/watchlist";
 import { LiveBadge } from "@/components/ui/bits";
 import { cycleNote, failedNote, RECHECK_LABEL, RECHECK_MS } from "@/lib/admin/recheck";
 import { compact } from "@/lib/format";
 import type { IconSummary } from "@/lib/icon";
 import type { Stream } from "@/lib/stream";
-import type { Watched } from "@/lib/watch";
 
 /**
  * The panel itself — the wall, with the moderation it has never had.
@@ -22,11 +20,14 @@ import type { Watched } from "@/lib/watch";
  * is a place where the same three actions happen behind a sign-in, so an
  * operator clearing up after a bad sourcing run is doing it as somebody.
  *
- * It is also the only surface for the watchlist and for the site's favicon,
- * neither of which is a moderation tool but both of which belong here for the
- * same reason: naming the channels the wall watches, and choosing the face
- * every tab wears, are standing decisions about what everyone sees, so they are
- * made by somebody.
+ * It is also the only surface for the site's favicon, which is not a moderation
+ * tool but belongs here for a related reason: choosing the face every tab wears
+ * is a standing decision about what everyone sees, so it is made by somebody.
+ * The watchlist used to sit here on that argument too and no longer does —
+ * naming a channel turned out to be the same kind of act as putting a stream up,
+ * so the list lives at `/channels`, where anybody can add to it. Only the
+ * un-watch button is still an operator's, and the panel links out rather than
+ * keeping a second copy of the list.
  *
  * Every action here re-authorizes on the server. This component being on screen
  * proves nothing to `/api/admin/streams`, which checks the cookie itself.
@@ -36,10 +37,8 @@ import type { Watched } from "@/lib/watch";
  * one thing a wall of live streams cannot afford. So the same two calls run
  * themselves every five minutes, in one cycle, and the page refreshes behind
  * them so the counts, the roster and the environment readout are as current as
- * the lists. The cycle has two triggers and one body: the timer, and adding a
- * watched username — because the answer to "is that channel on air" is
- * interesting *now*, not at the next boundary. A run restarts the clock, so the
- * two triggers cannot stack.
+ * the lists. A run restarts the clock from where it finished rather than on a
+ * fixed drumbeat.
  */
 
 export interface Readout {
@@ -54,7 +53,8 @@ export interface PanelData {
   dismissed: number;
   environment: Readout[];
   admins: { handle: string; createdAt: number }[];
-  watchlist: Watched[];
+  /** How many channels the wall watches. The list itself is at `/channels`. */
+  watched: number;
   /** The favicon everyone sees. `null` is the one this build ships with. */
   icon: IconSummary | null;
 }
@@ -66,7 +66,6 @@ function day(ms: number): string {
 
 interface Leg {
   streams?: Stream[];
-  watchlist?: Watched[];
   result?: { found?: number };
 }
 
@@ -92,7 +91,6 @@ async function leg(path: string, method: string): Promise<Leg | null> {
 
 export function Panel({ initial }: { initial: PanelData }) {
   const [streams, setStreams] = useState(initial.streams);
-  const [watchlist, setWatchlist] = useState(initial.watchlist);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -143,22 +141,23 @@ export function Panel({ initial }: { initial: PanelData }) {
    * The order is the point. A sweep can put a stream up, so running it first
    * means the liveness pass behind it covers what was just added instead of
    * leaving it unconfirmed for five minutes. Neither call is new — they are
-   * exactly what **Check now** and **Re-ask liveness** have always sent, which
-   * is what keeps the automatic path and the manual one from disagreeing.
+   * exactly what **Check now** on `/channels` and **Re-ask liveness** here have
+   * always sent, which is what keeps the automatic path and the manual one from
+   * disagreeing. The sweep's route is public now (`/api/watchlist`); this leg
+   * runs it for the wall's sake rather than the watchlist's.
    */
   const recheck = useCallback(async () => {
-    // Two triggers, one body. A cycle already in flight wins; the one that
-    // arrives on top of it drops rather than doubling every request.
+    // A cycle already in flight wins; one that arrives on top of it drops
+    // rather than doubling every request.
     if (running.current) return;
     running.current = true;
     setChecking(true);
     try {
-      const sweep = await leg("/api/admin/watchlist", "PUT");
+      const sweep = await leg("/api/watchlist", "PUT");
       if (!sweep) {
         setChecked(failedNote(Date.now()));
         return;
       }
-      if (sweep.watchlist) setWatchlist(sweep.watchlist);
       if (sweep.streams) setStreams(sweep.streams);
 
       const pass = await leg("/api/admin/streams", "POST");
@@ -191,8 +190,8 @@ export function Panel({ initial }: { initial: PanelData }) {
   }, [router]);
 
   // The clock. It counts from the end of the last cycle rather than from a
-  // fixed drumbeat, which is what stops a run somebody triggered — by adding a
-  // username — from being followed seconds later by the interval's own.
+  // fixed drumbeat, so a cycle that took a while to answer is followed by a
+  // whole interval of quiet rather than by the next tick landing on top of it.
   useEffect(() => {
     const since = ranAt === null ? 0 : Date.now() - ranAt;
     const timer = window.setTimeout(
@@ -281,7 +280,7 @@ export function Panel({ initial }: { initial: PanelData }) {
             ? "Checking every URL now…"
             : checked
               ? `${checked} · again in ${RECHECK_LABEL}`
-              : `Every URL here is re-checked every ${RECHECK_LABEL}, and adding a watched channel checks straight away.`}
+              : `Every URL here is re-checked every ${RECHECK_LABEL}, along with a sweep of the watched channels.`}
         </p>
       </section>
 
@@ -343,17 +342,26 @@ export function Panel({ initial }: { initial: PanelData }) {
         )}
       </section>
 
-      {/* Its own routes and its own errors, but not its own copy of the list:
-          the cycle above sweeps the watchlist too, and a section that kept a
-          private copy would show a stale "last on air" every time it did.
-          `onAdded` is the second trigger — a username going on is a question
-          worth asking the platforms immediately. */}
-      <Watchlist
-        watchlist={watchlist}
-        onWatchlist={setWatchlist}
-        onStreams={setStreams}
-        onAdded={recheck}
-      />
+      {/* A pointer, not a second copy of the list. The watchlist is public and
+          lives at `/channels`; keeping an editable copy here would be a second
+          answer to "who is watched", and the two would disagree the moment
+          somebody added a channel from the page the link goes to. */}
+      <section>
+        <p className="eyebrow">Watched channels</p>
+        <p className="mt-1 max-w-prose text-[15px] text-muted">
+          {initial.watched === 0
+            ? "Nobody is watched yet."
+            : `${initial.watched} ${initial.watched === 1 ? "channel is" : "channels are"} watched.`}{" "}
+          The list is public — anyone can add a channel, and only an operator can stop watching
+          one. The cycle above sweeps it either way.
+        </p>
+        <Link
+          href="/channels"
+          className="mt-4 inline-block border border-edge px-3 py-2 font-mono text-[11px] tracking-[0.12em] text-bone uppercase transition-colors hover:border-teal hover:text-teal"
+        >
+          Open the channels page
+        </Link>
+      </section>
 
       {/* Outside the cycle above, deliberately: the favicon is not something
           that changes underneath the panel every five minutes, and re-fetching

@@ -22,6 +22,12 @@ export function SiteFooter() {
             The wall
           </Link>
           <Link
+            href="/channels"
+            className="font-mono text-xs tracking-[0.1em] text-muted uppercase transition-colors hover:text-bone"
+          >
+            Channels
+          </Link>
+          <Link
             href="/report"
             className="font-mono text-xs tracking-[0.1em] text-muted uppercase transition-colors hover:text-bone"
           >

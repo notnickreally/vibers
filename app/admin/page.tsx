@@ -81,7 +81,7 @@ export default async function AdminPage() {
           dismissed: dismissed.length,
           environment: environmentReadout(),
           admins,
-          watchlist,
+          watched: watchlist.length,
           icon,
         }}
       />

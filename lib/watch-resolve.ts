@@ -175,8 +175,14 @@ async function youtubeFromPage(
       next: { revalidate: 300 },
     });
     if (!res.ok) return null;
-    // The tags and the canonical live in `<head>`; the rest is the app bundle.
-    html = (await res.text()).slice(0, 400_000);
+    // The whole document, under a ceiling — *not* just the top of it. The two
+    // things read below are much further down than "they're in `<head>`"
+    // suggests: a channel page is around 1.9 MB, and YouTube emits its
+    // `<link rel="canonical">` and its `og:title` after the inline app bundle,
+    // about 740 KB in. Keeping only the first few hundred kilobytes finds
+    // neither, which fails every keyless add with "YouTube wouldn't say" — the
+    // one path that has to work on a deployment with no `YOUTUBE_API_KEY`.
+    html = (await res.text()).slice(0, 4_000_000);
   } catch {
     return null;
   }
@@ -225,7 +231,7 @@ async function resolveTwitch(
  * A parsed lookup, established against its platform. Throws `LookupError`.
  *
  * The throw is the point: an add that cannot name the channel must fail loudly
- * in the panel, because the alternative — storing the raw text as the name — is
+ * on the page, because the alternative — storing the raw text as the name — is
  * a watchlist entry that looks fine and watches nobody.
  */
 export async function resolveWatch(lookup: WatchLookup): Promise<Resolved> {

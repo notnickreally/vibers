@@ -3,8 +3,8 @@
  *
  * Three things have to happen together — read the watchlist, ask both platforms
  * who is on air, write the answer into the shared wall — and two callers need
- * all three: the wall's own sourcing run, which every visitor triggers, and the
- * panel's **Check now**, which an admin presses to see it work. A second
+ * all three: the wall's own sourcing run, which every visitor triggers, and
+ * **Check now** on `/channels`, which anybody can press to see it work. A second
  * spelling of this sequence is how the two surfaces end up disagreeing about
  * what "watched" means, so there is one.
  *
@@ -52,7 +52,7 @@ export async function sourceWatched(
 ): Promise<SourcedRun> {
   const sweep = await sweepWatchlist(await listWatched(), fresh);
   const streams = await wall.applySourced([...also, ...sweep.streams], now);
-  // Only for the panel to render — nothing branches on it. Written after the
+  // Only for the channels page to render — nothing branches on it. Written after the
   // wall, because a failure here must not cost the streams we just put up.
   await noteLive(sweep.liveKeys, now);
   return { streams, watchlist: sweep.result };
