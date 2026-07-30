@@ -15,7 +15,6 @@ import {
   DEFAULT_VIEW,
   listStreams,
   type Mode,
-  MODES,
   partition,
   refreshLiveness,
   removeStream,
@@ -32,10 +31,17 @@ import {
 /**
  * The wall: every stream you've put on the network, as a bank of monitors.
  *
- * Two modes, because they trade off against each other. **Monitors** is the
- * default: live muted players, the view worth having open on a second screen,
- * at one embed per tile. **Posters** swaps them for thumbnails — cheap, quiet,
- * scrolls forever — for when the wall is long or the connection is not.
+ * One mode, and it is the one the product is named for: live muted players, one
+ * embed per tile, the view worth having open on a second screen. There used to
+ * be a switch to the cheap poster view beside the grid control; it is gone.
+ * Nobody arrived at a wall of running monitors wanting to turn them into
+ * stills, and a toggle whose second position undoes the whole point of the page
+ * is a control that only ever costs. Posters still draw — an ended broadcast
+ * and a warming-up tile are both a thumbnail — they just aren't a mode you pick.
+ *
+ * What is left above the wall is the two things that actually shape the feed,
+ * on one line: the **All / Live / Ended** tabs at the reading edge, and how many
+ * tiles run per row at the far end of the same rule.
  *
  * And one feed, in three views. The wall reads top to bottom: what is on air
  * first, everything that has finished stacked underneath it, so an ended
@@ -69,7 +75,11 @@ const SHELF_EMPTY: Record<Shelf, string> = {
 export function MonitorWall() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState<Mode>(DEFAULT_MODE);
+  // Not state any more: the wall draws monitors, full stop. The switch that
+  // used to sit above the grid is gone, so the only thing left to say about the
+  // mode is which one it is — and the tiles still need to be told, because an
+  // ended broadcast draws its poster in either.
+  const mode: Mode = DEFAULT_MODE;
   const [size, setSize] = useState<Size>(3);
   const [view, setView] = useState<WallView>(DEFAULT_VIEW);
   // Sourcing still runs; it just isn't narrated any more. What is left of it
@@ -205,7 +215,7 @@ export function MonitorWall() {
         </div>
       ) : (
         <>
-          <div className="mt-10 flex flex-wrap items-center gap-5 border-b border-edge-soft">
+          <div className="mt-10 flex flex-wrap items-center gap-x-5 gap-y-3 border-b border-edge-soft">
             {/* Still a tablist, and still the thing that decides what the wall
                 shows — it just isn't load-bearing for reaching the ended half
                 any more, because All already stacks it under the live one. */}
@@ -234,37 +244,22 @@ export function MonitorWall() {
                 </button>
               ))}
             </div>
-          </div>
 
-          <div className="mt-4 mb-5 flex flex-wrap items-center gap-x-6 gap-y-3">
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[10px] tracking-[0.14em] text-faint uppercase">
-                View
-              </span>
-              {MODES.map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMode(m)}
-                  className={`border px-2.5 py-1 font-mono text-[10px] tracking-[0.1em] uppercase transition-colors ${
-                    mode === m
-                      ? "border-amber bg-amber/12 text-amber"
-                      : "border-edge-soft text-muted hover:text-bone"
-                  }`}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[10px] tracking-[0.14em] text-faint uppercase">
-                Grid
-              </span>
+            {/* How wide the wall runs, at the far end of the same rule the tabs
+                sit on: the two things that shape the feed, one line, one border,
+                the filters at the reading edge and the size at the other. It
+                needs no "Grid" label — three numbers next to a wall of tiles
+                only mean one thing, and the word was there to fill a row that no
+                longer exists. */}
+            <div className="ml-auto flex items-center gap-2 pb-1.5">
               {([2, 3, 4] as Size[]).map((s) => (
                 <button
                   key={s}
                   type="button"
+                  // The word that used to sit in front of these is gone, so each
+                  // button has to say for itself what its bare numeral means.
+                  aria-label={`${s} per row`}
+                  aria-pressed={size === s}
                   onClick={() => setSize(s)}
                   className={`w-7 border py-1 font-mono text-[10px] transition-colors ${
                     size === s
@@ -276,11 +271,16 @@ export function MonitorWall() {
                 </button>
               ))}
             </div>
+          </div>
 
-            {/* True of any view that shows the live shelf — which is now two of
-                the three, so it can't be read off the tab name alone. */}
-            {mode === "monitors" && view !== "ended" && live.length > 0 && (
-              <p className="ml-auto font-mono text-[10px] text-faint">
+          {/* The caption is all that is left of the old controls row, so it
+              carries that row's spacing whether or not it has anything to say —
+              the gap under the tabs shouldn't collapse on the Ended view. True
+              of any view that shows the live shelf, which is now two of the
+              three, so it can't be read off the tab name alone. */}
+          <div className="mt-3 mb-5">
+            {view !== "ended" && live.length > 0 && (
+              <p className="font-mono text-[10px] text-faint">
                 {live.length} players running, all muted
               </p>
             )}

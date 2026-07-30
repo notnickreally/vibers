@@ -297,14 +297,16 @@ export const MODES: Mode[] = ["posters", "monitors"];
  *
  * The wall is the product, and the wall is a bank of running players — posters
  * are the cheap fallback, and opening on them made every first visit look like
- * a grid of stills you had to go find a switch to animate. So the switch starts
- * flipped. It costs one embed per live tile on load, which is exactly what the
- * monitors mode has always cost; the tiles already stagger themselves with
- * `loading="lazy"` so the off-screen ones wait their turn, and the Ended shelf
- * still takes no player in any mode.
+ * a grid of stills you had to go find a switch to animate. So the switch was
+ * flipped, and then the switch was removed: this is no longer the mode the wall
+ * starts in, it is the mode the wall is. It costs one embed per live tile on
+ * load, which is exactly what the monitors mode has always cost; the tiles
+ * already stagger themselves with `loading="lazy"` so the off-screen ones wait
+ * their turn, and the Ended shelf still takes no player.
  *
- * Nothing persists this — the toggle is component state — so "default" means
- * the state every load starts in, not a preference someone can outlive.
+ * `MODES` outlives the toggle it was written for because it is still the honest
+ * answer to "how can a tile draw" — posters is what an ended broadcast and a
+ * warming-up tile fall back to. It just isn't a choice anyone is offered.
  */
 export const DEFAULT_MODE: Mode = "monitors";
 
