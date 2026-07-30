@@ -64,6 +64,7 @@ export function StreamWheel({ streams }: { streams: Stream[] }) {
     // inline, so flattening means removing them rather than overriding them.
     const flatten = () => {
       wheel.removeAttribute("data-turning");
+      track.style.perspectiveOrigin = "";
       for (const cell of cells()) {
         cell.style.transform = "";
         cell.style.opacity = "";
@@ -89,6 +90,14 @@ export function StreamWheel({ streams }: { streams: Stream[] }) {
       const box = wheel.getBoundingClientRect();
       const axle = box.top + box.height / 2;
       const half = box.height / 2;
+      // The perspective sits on the track so the tiles are direct children of it
+      // — the alternative put `preserve-3d` in between, which is what made the
+      // whole wall unclickable (see `.stream-wheel-track` in globals.css). The
+      // price is this line: `perspective-origin` is resolved against the track,
+      // which is the whole scrollable list, so the eye has to be moved to the
+      // middle of the *window* on it. Left at its own 50% the wheel would bulge
+      // around the middle of the wall and skew everywhere else.
+      track.style.perspectiveOrigin = `50% ${wheel.scrollTop + wheel.clientHeight / 2}px`;
       const seated = cells();
       const seats = seated.map((cell) => {
         const rect = cell.getBoundingClientRect();

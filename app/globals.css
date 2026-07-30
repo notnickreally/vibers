@@ -407,22 +407,30 @@
   .stream-wheel {
     overflow-y: auto;
     overflow-x: hidden;
-    /* The vanishing point belongs to the wheel, not to each tile: on the
-       container every tile converges on the same point, which is what makes the
-       column read as one curved surface instead of a stack of tilted cards.
-       It sits at the middle of this box and stays there while the content
-       scrolls past it — the viewer doesn't move, the drum does. */
-    perspective: 900px;
-    perspective-origin: 50% 50%;
     /* Proximity, not mandatory: the wheel finds a detent when you let go near
        one, and otherwise stays out of the way of a long scroll. */
     scroll-snap-type: y proximity;
   }
 
-  /* The perspective above applies to the wheel's *children*; the tiles are its
-     grandchildren, so the track has to pass it through rather than flatten it. */
+  /* The vanishing point lives here, on the tiles' direct parent, and that
+     placement is a bug fix rather than a preference. `perspective` only reaches
+     an element's own children, so putting it on the wheel meant the track had to
+     carry `transform-style: preserve-3d` to pass it down to the tiles — and
+     under `preserve-3d` Chromium hit-tests the tiles where layout left them
+     while painting them where the transform puts them. Every tile was drawn on
+     the drum and clickable somewhere else: nine of 183 probe points across the
+     wall landed on the link they were drawn over, and the tiles nearest the rims
+     — furthest from where layout thinks they are — could not be clicked at all.
+
+     With the perspective one level down the tiles are direct children, nothing
+     needs `preserve-3d`, and the projection is unchanged: 183 of 183 now.
+
+     One consequence: `perspective-origin` has to be written per frame, because
+     the track is far taller than the window it shows through, and a vanishing
+     point at *its* middle is not the one at the middle of the wheel. The
+     component keeps it on the axle in `stream-wheel.tsx`. */
   .stream-wheel-track {
-    transform-style: preserve-3d;
+    perspective: 900px;
     /* A little air at each end so the first and last tiles are on the drum
        rather than jammed against the rim they started at. Deliberately not half
        the wheel's height — that is how a picker centres its first row, and it
@@ -431,7 +439,6 @@
   }
 
   .stream-wheel-cell {
-    transform-style: preserve-3d;
     transform-origin: 50% 50%;
     scroll-snap-align: center;
   }
