@@ -100,8 +100,28 @@ export function WatchView({ videoId }: { videoId: string }) {
   const isLong = description.length > 420;
 
   return (
-    <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_320px]">
-      <div className="min-w-0">
+    /* Three regions, one grid: the stage, the chat, and the rest of the wall.
+       Where the chat lands is a question about room. Given room it goes to the
+       *left* of the picture — a chat is a column of short lines, and a 1200px
+       one stacked under the fold beside an empty rail was the worst of both
+       — and where there is no room it drops back under the picture, which is
+       where it has always been.
+
+       The switch is grid placement and nothing else. The chat is the same node
+       in the same place in the tree at every width, moved by `col-start` and
+       `row-start`, and that is deliberate: re-parenting it would remount the
+       `<iframe>`, which is the one thing `LiveChat` spends its whole file
+       avoiding — the frame is YouTube's cross-origin `live_chat` document, so a
+       remount reloads it and drops whatever session it had signed into. Asking
+       CSS rather than measuring also gets the first paint right, before
+       hydration, which no measured layout can.
+
+       Where the line falls: the page is capped at 1600px like every other page
+       here, so a 340px chat column plus the 320px wall rail still leave the
+       picture ~810px from `2xl` (1536px) up. Below that the chat would be taking
+       width the picture cannot spare, so it goes back underneath. */
+    <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[340px_minmax(0,1fr)_320px]">
+      <div className="min-w-0 xl:col-start-1 xl:row-start-1 2xl:col-start-2">
         {source?.provider === "twitch" ? (
           <TwitchPlayer
             source={source}
@@ -208,17 +228,24 @@ export function WatchView({ videoId }: { videoId: string }) {
             )
           )}
         </div>
+      </div>
 
-        {/* The chat, under the picture. Two tabs: the stream's real YouTube
-            live chat, and your own local notes. It stays mounted whatever
-            `isLive` turns out to be, so it can't appear or vanish under the
-            reader when the live lookup lands — that only decides which tab
-            opens, and only until someone picks one. */}
+      {/* The chat. Two tabs: the stream's real YouTube live chat, and your own
+          local notes. It stays mounted whatever `isLive` turns out to be, so it
+          can't appear or vanish under the reader when the live lookup lands —
+          that only decides which tab opens, and only until someone picks one.
+
+          It sits after the stream in the source at every width, whichever side
+          it is drawn on: the stream is what this page is about, so it reads
+          first and, on a narrow screen, stacks first. */}
+      <div className="min-w-0 xl:col-start-1 xl:row-start-2 2xl:row-start-1">
         <LiveChat videoId={videoId} isLive={stream?.isLive} />
       </div>
 
-      {/* The rest of the wall, so you can hop between streams. */}
-      <aside className="min-w-0">
+      {/* The rest of the wall, so you can hop between streams. Its rail keeps
+          the right-hand column in both wide arrangements — it is the one region
+          the chat never trades places with. */}
+      <aside className="min-w-0 xl:col-start-2 xl:row-start-1 xl:row-span-2 2xl:col-start-3 2xl:row-span-1">
         <p className="eyebrow mb-3">Also on the wall</p>
         {others.length === 0 ? (
           <p className="border border-dashed border-edge p-4 font-mono text-[11px] leading-relaxed text-faint">
