@@ -273,18 +273,12 @@ export function MonitorWall() {
             </div>
           </div>
 
-          {/* The caption is all that is left of the old controls row, so it
-              carries that row's spacing whether or not it has anything to say —
-              the gap under the tabs shouldn't collapse on the Ended view. True
-              of any view that shows the live shelf, which is now two of the
-              three, so it can't be read off the tab name alone. */}
-          <div className="mt-3 mb-5">
-            {view !== "ended" && live.length > 0 && (
-              <p className="font-mono text-[10px] text-faint">
-                {live.length} players running, all muted
-              </p>
-            )}
-          </div>
+          {/* This spacer is all that is left of the old controls row, so it
+              carries that row's spacing regardless — the gap under the tabs
+              shouldn't collapse on the Ended view. True of any view that
+              shows the live shelf, which is now two of the three, so it
+              can't be read off the tab name alone. */}
+          <div className="mt-3 mb-5" />
 
           {WALL_VIEWS.map((name) => {
             const stacked = shelvesFor(name);
