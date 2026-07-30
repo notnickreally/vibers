@@ -3,6 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+/**
+ * The top nav. Two entries, and the second one is the point of it existing:
+ * the channels the wall watches are public information about a public wall, so
+ * the list is a page beside the wall rather than a section of `/admin`.
+ */
+const LINKS = [
+  { href: "/", label: "The wall" },
+  { href: "/channels", label: "Channels" },
+] as const;
+
 export function SiteHeader() {
   const pathname = usePathname();
 
@@ -19,14 +29,18 @@ export function SiteHeader() {
         </Link>
 
         <nav className="flex items-center gap-1">
-          <Link
-            href="/"
-            className={`px-3 py-1.5 font-mono text-xs tracking-[0.1em] uppercase transition-colors ${
-              pathname === "/" ? "text-amber" : "text-muted hover:text-bone"
-            }`}
-          >
-            The wall
-          </Link>
+          {LINKS.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              aria-current={pathname === link.href ? "page" : undefined}
+              className={`px-3 py-1.5 font-mono text-xs tracking-[0.1em] uppercase transition-colors ${
+                pathname === link.href ? "text-amber" : "text-muted hover:text-bone"
+              }`}
+            >
+              {link.label}
+            </Link>
+          ))}
         </nav>
 
         <p className="ml-auto hidden font-mono text-[11px] text-faint sm:block">

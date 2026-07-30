@@ -9,14 +9,17 @@
  * Two things follow from the wall being shared, and they are worth saying
  * plainly because they are behaviour rather than implementation:
  *
- * **The watchlist is shared too.** A channel one admin adds is watched for
- * everybody, and a channel one admin removes stops being watched for
- * everybody. There is no per-operator list.
+ * **The watchlist is shared too.** A channel anyone adds is watched for
+ * everybody, and a channel an operator removes stops being watched for
+ * everybody. There is no per-visitor list — which is exactly why adding is open
+ * and removing is not: one of those is additive and the other is a decision on
+ * everyone else's behalf. `app/api/watchlist/route.ts` is where that line is
+ * drawn; nothing in this file knows who is calling it.
  *
  * **Removing a channel does not take its streams down.** What is already on the
  * wall stays there, keeps refreshing, and sweeps itself out after
- * `SOURCED_TTL_MS` like any other sourced entry — or an admin takes it off by
- * hand. Un-watching says "stop adding this one", not "undo what you added",
+ * `SOURCED_TTL_MS` like any other sourced entry — or somebody takes it off the
+ * wall by hand. Un-watching says "stop adding this one", not "undo what you added",
  * because those are two different intentions and only one of them was asked
  * for.
  */
@@ -123,7 +126,7 @@ export async function unwatch(key: string): Promise<boolean> {
 /**
  * Note that these channels were seen on air just now.
  *
- * Only for the panel to render — nothing branches on it. It exists because
+ * Only for the channels page to render — nothing branches on it. It exists because
  * "added, and never once seen live" and "added, and live yesterday" look
  * identical in a list that only carries a name, and an operator staring at a
  * channel that never appears needs to be able to tell a wrong handle from a

@@ -3,7 +3,7 @@
  *
  * Auto-sourcing already fills the wall by *keyword* — it goes looking for
  * whatever is live and matches "live coding". This is the other half of the
- * same idea and the one an operator actually asks for: name the people you
+ * same idea and the one people actually ask for: name the people you
  * care about, and the wall puts them up the moment they go on air.
  *
  * Everything here is pure and client-safe, for the same reason `lib/source.ts`
@@ -32,7 +32,7 @@
  * `twitch.tv/someone` and `youtube.com/@someone` say which platform they are.
  * A bare `someone` does not — it is a plausible Twitch login *and* a plausible
  * YouTube handle, and guessing would put the wrong person's stream on a wall
- * everybody can see. So the panel sends the platform alongside the text, and a
+ * everybody can see. So the page sends the platform alongside the text, and a
  * bare word with no platform is refused rather than assumed. A link overrides
  * the platform, because a link is the stronger statement.
  */
@@ -87,12 +87,16 @@ export interface Watched extends WatchTarget {
   key: string;
   /** What the channel calls itself. Never invented — see `lib/watch-resolve.ts`. */
   name: string;
-  /** What the operator typed, kept so the list reads back the way it was entered. */
+  /** What was typed, kept so the list reads back the way it was entered. */
   input: string;
   /** The channel's page on its own platform. */
   url: string;
   addedAt: number;
-  /** Which admin added it. The wall is shared; the watchlist is attributed. */
+  /**
+   * Who added it, when that is anybody — a signed-in operator's handle.
+   * Attribution rather than ownership: adding is open, so most rows have nobody's
+   * name on them and the absence means anonymous, not unknown.
+   */
   addedBy?: string;
   /** When the sweep last saw this channel on air. Absent means never, here. */
   lastLiveAt?: number;
@@ -194,7 +198,7 @@ function twitchFrom(input: string): WatchLookup | null {
 /**
  * A pasted username or profile link, as something we can go and ask about.
  *
- * `hint` is the platform the panel's selector was on. It decides a bare word
+ * `hint` is the platform the page's selector was on. It decides a bare word
  * and nothing else — a recognisable link names its own platform, and that wins,
  * so pasting a Twitch URL with the selector on YouTube adds the Twitch channel
  * rather than failing on a mismatch nobody meant.

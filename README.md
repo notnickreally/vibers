@@ -48,6 +48,18 @@ asked for. The video resource is the only thing that knows. A **Sourced** mark
 tells you which tiles you chose and which the site did; taking one off is
 remembered, so it doesn't come back on your next visit.
 
+**Watched channels.** The third way, and the one people actually ask for: name a
+YouTube or Twitch channel on [`/channels`](#routes) and the wall puts its stream
+up on its own, every time it goes on air. Anyone can add one — it is the same
+wall, so it is the same door the paste box is. **Un-watching is an operator's**,
+because adding a name costs everybody nothing and taking one off stops it for
+everybody; the page says so rather than showing a button that refuses. The sweep
+behind it is keyless on the discovery half — a channel's own RSS feed carries the
+video id of a broadcast that has just started, and `videos.list` still has to
+confirm it, so nothing is ever called live on a guess. Un-watching leaves what is
+already on the wall alone: it says "stop adding this one", which is a different
+thing from "undo what you added".
+
 **Watching.** `/watch/[videoId]` plays one stream with YouTube's control bar
 turned off, driven through the IFrame Player API with our own controls
 underneath — play/pause, mute, volume, fullscreen, and a *jump to live* button
@@ -238,6 +250,7 @@ before anyone judges it.
 | `/` | The wall — add streams, posters/monitors view, grid sizing |
 | `/watch/[id]` | One stream on the clean player, with title, channel, description, and the chat panel — left of the picture where there's room, under it where there isn't |
 | `/report` | Takedown path for a creator |
+| `/channels` | The channels the wall watches — anyone can add one, only an operator can un-watch |
 | `/api/lookup?v=` | Metadata lookup for either platform — takes a pasted link or a stored key |
 | `/api/youtube?v=` | The YouTube-only lookup (oEmbed, plus Data API when a key is set) |
 | `/api/youtube/status?ids=` | Batched liveness for the whole wall at once |
@@ -245,6 +258,7 @@ before anyone judges it.
 | `/api/streams` | The shared wall: `GET` it, `POST {v}` to put one up, `DELETE ?v=` / `?sourced=1` to take one off |
 | `/api/streams/refresh` | Re-asks liveness for the whole wall and writes it back |
 | `/api/streams/source` | Runs discovery and folds what it finds into the wall |
+| `/api/watchlist` | The watched channels: `GET` them, `POST {input, provider}` to watch one, `PUT` to sweep now — all open. `DELETE ?key=` needs a session |
 | `/admin` | The panel — the wall with moderation, and which environment variables are set |
 | `/admin/login` | The gate: the Slate, the Patch Bay, the Vectorscope |
 | `/admin/signup` | Make an operator account, using the deployment's signup password |
@@ -318,12 +332,18 @@ it loaded — the one thing a board of live streams cannot afford. Now one cycle
 runs on its own: sweep the watched channels, then re-ask liveness for every URL
 on the wall, then refresh the page behind both so the counts, the roster and the
 environment read-out are as current as the lists. It is the same two calls the
-buttons send, so the automatic path and the manual one can't disagree. The cycle
-has a second trigger: **adding a watched username runs it immediately**, because
-a name typed in is a name somebody wants an answer about now, not at the next
-tick — and a run restarts the clock, so the two triggers never stack. A line
-under the wall says when the last cycle ran and what it checked; an automatic
-thing with no moment needs one.
+buttons send, so the automatic path and the manual one can't disagree. The clock
+counts from the end of the last cycle rather than on a fixed drumbeat, so a run
+that took a while to answer is followed by a whole interval of quiet instead of
+by the next tick landing on top of it. A line under the wall says when the last
+cycle ran and what it checked; an automatic thing with no moment needs one.
+
+The watchlist itself is **not** here any more. Naming a channel turned out to be
+the same kind of act as putting a stream up, so the list is a public page at
+`/channels` and the panel links out to it rather than keeping a second, editable
+copy that would disagree with it the moment somebody added one. What stayed
+behind the gate is the un-watch button — and the panel's own cycle still sweeps
+the list, because what the sweep writes to is the wall.
 
 Getting in takes three layers, and two of them are not passwords:
 
@@ -363,4 +383,7 @@ the notes tab is a local, per-browser stand-in for the half that would be ours.
 The public wall routes are still anonymous, deliberately — anyone can put a
 stream up and anyone can take one down, because the wall is meant to be
 everybody's. `/admin` adds a place where the same actions happen behind a
-sign-in; it does not yet record who did which.
+sign-in; it does not yet record who did which. The watchlist is the one place
+that half-does: an add carries the operator's handle when an operator made it and
+nobody's when anybody did, and `DELETE` is the one public-facing action on the
+site that requires a session at all.
