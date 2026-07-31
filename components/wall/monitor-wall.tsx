@@ -25,6 +25,7 @@ import {
   sourceStreams,
   type Stream,
   WALL_VIEWS,
+  WallError,
   type WallView,
 } from "@/lib/stream";
 
@@ -60,6 +61,14 @@ import {
  * one never was, so there is a failure path — and it is a message, never a
  * fallback. An empty grid where a full wall should be is a lie that looks
  * exactly like the truth.
+ *
+ * Shared cuts both ways, and the ✕ is where it bites. Putting a stream up is
+ * anybody's — that is what the box at the top is for — but taking one off
+ * happens to everybody at once and there is no undo, so it stays with whoever
+ * holds the panel. `isAdmin` decides whether the ✕ is *drawn*, never whether it
+ * is allowed: `/api/streams` checks the cookie on every `DELETE` itself, because
+ * a page that hides a button proves nothing to a route `curl` can reach. Same
+ * split, and the same sentence said out loud, as `components/channels/channel-list.tsx`.
  */
 
 type Size = 2 | 3 | 4;
@@ -72,7 +81,12 @@ const SHELF_EMPTY: Record<Shelf, string> = {
   ended: "Nothing has ended yet.",
 };
 
-export function MonitorWall() {
+export function MonitorWall({
+  /** Whether to draw the ✕ buttons. The route decides whether they work. */
+  isAdmin = false,
+}: {
+  isAdmin?: boolean;
+}) {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [loading, setLoading] = useState(true);
   // Not state any more: the wall draws monitors, full stop. The switch that
@@ -87,6 +101,9 @@ export function MonitorWall() {
   // flight, so an empty wall waits on a skeleton instead of saying it is empty.
   const [sourcing, setSourcing] = useState(false);
   const [error, setError] = useState("");
+  // Which tile is mid-removal, so its ✕ can say so. One at a time is not a
+  // constraint the wall imposes — it is simply what a single pointer does.
+  const [removing, setRemoving] = useState<string | null>(null);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => {
@@ -157,9 +174,29 @@ export function MonitorWall() {
       setStreams(await action());
       setError("");
     } catch (err) {
+      // A 401 only ever comes back from a removal, and only for a session that
+      // went away underneath us — expired, or a credential changed. The button
+      // was on screen a moment ago, so a red box explaining a refusal would be
+      // the wrong answer; the gate is. Same move `channel-list.tsx` makes.
+      if (err instanceof WallError && err.status === 401) {
+        window.location.assign("/admin/login");
+        return;
+      }
       setError(err instanceof Error ? err.message : "The wall isn't answering.");
     }
   }, []);
+
+  const remove = useCallback(
+    async (videoId: string) => {
+      setRemoving(videoId);
+      try {
+        await write(() => removeStream(videoId));
+      } finally {
+        setRemoving(null);
+      }
+    },
+    [write],
+  );
 
   // Arrow keys move between tabs, Home/End jump to the ends — the half of the
   // tabs pattern that a plain row of buttons doesn't give you for free.
@@ -273,12 +310,16 @@ export function MonitorWall() {
             </div>
           </div>
 
-          {/* This spacer is all that is left of the old controls row, so it
-              carries that row's spacing regardless — the gap under the tabs
-              shouldn't collapse on the Ended view. True of any view that
-              shows the live shelf, which is now two of the three, so it
-              can't be read off the tab name alone. */}
-          <div className="mt-3 mb-5" />
+          {/* What used to be a bare spacer — the last of the old controls row —
+              now carries the one rule the wall can't demonstrate by drawing a
+              button, said in the row's own spacing. For a visitor the missing
+              ✕ is the whole point: nobody should have to press something and
+              read a 401 to find out that removal isn't theirs. */}
+          <p className={`mt-3 mb-5 font-mono text-[11px] ${isAdmin ? "text-muted" : "text-faint"}`}>
+            {isAdmin
+              ? "Signed in — ✕ takes a stream off the wall for everybody, and a sourced one stays off."
+              : "Anyone can put a stream up. Taking one off is an operator's — it comes off for everybody."}
+          </p>
 
           {WALL_VIEWS.map((name) => {
             const stacked = shelvesFor(name);
@@ -312,7 +353,9 @@ export function MonitorWall() {
                       // heading; stacked, the sections have to name themselves,
                       // and that name is what you scroll down to find.
                       titled={stacked.length > 1}
-                      onRemove={(videoId) => write(() => removeStream(videoId))}
+                      isAdmin={isAdmin}
+                      removing={removing}
+                      onRemove={remove}
                     />
                   ))}
               </div>
@@ -344,6 +387,8 @@ function ShelfSection({
   mode,
   cols,
   titled,
+  isAdmin,
+  removing,
   onRemove,
 }: {
   shelf: Shelf;
@@ -351,6 +396,8 @@ function ShelfSection({
   mode: Mode;
   cols: string;
   titled: boolean;
+  isAdmin: boolean;
+  removing: string | null;
   onRemove: (videoId: string) => void;
 }) {
   if (streams.length === 0) {
@@ -374,6 +421,10 @@ function ShelfSection({
             key={s.videoId}
             stream={s}
             mode={mode}
+            // Drawn for an operator only. `/api/streams` re-checks the cookie
+            // on every `DELETE`, so this decides the picture, not the rule.
+            canRemove={isAdmin}
+            removing={removing === s.videoId}
             onRemove={() => onRemove(s.videoId)}
           />
         ))}
@@ -385,10 +436,14 @@ function ShelfSection({
 function Monitor({
   stream,
   mode,
+  canRemove,
+  removing,
   onRemove,
 }: {
   stream: Stream;
   mode: Mode;
+  canRemove: boolean;
+  removing: boolean;
   onRemove: () => void;
 }) {
   const state = cardState(stream);
@@ -437,14 +492,19 @@ function Monitor({
             Sourced
           </span>
         )}
-        <button
-          type="button"
-          onClick={onRemove}
-          aria-label={`Take ${stream.title} off the wall`}
-          className="ml-auto px-1 font-mono text-[11px] text-faint transition-colors hover:text-del"
-        >
-          ✕
-        </button>
+        {/* An operator's, and only drawn for one. A visitor gets no button
+            rather than a button that 401s — the head simply ends here. */}
+        {canRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            disabled={removing}
+            aria-label={`Take ${stream.title} off the wall`}
+            className="ml-auto px-1 font-mono text-[11px] text-faint transition-colors hover:text-del disabled:text-muted"
+          >
+            {removing ? "…" : "✕"}
+          </button>
+        )}
       </div>
 
       <div className="relative aspect-video bg-black">
