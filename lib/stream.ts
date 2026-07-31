@@ -79,6 +79,26 @@ export interface Status {
 export interface Metadata extends Omit<Stream, "addedAt"> {}
 
 /**
+ * A refusal from the wall, with the code it came back as.
+ *
+ * The message alone was enough while every failure was the database being
+ * unreachable — one sentence, shown, done. Removal is gated now, and a 401 is
+ * the one failure that isn't about the wall at all: it means the session
+ * expired underneath a button that was already on screen, and the only useful
+ * response is the gate rather than a red box. So the status travels with the
+ * sentence. Same reason `channel-list.tsx` reads `response.status`.
+ */
+export class WallError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "WallError";
+    this.status = status;
+  }
+}
+
+/**
  * Ask the wall's routes. Every one of these throws rather than degrading.
  *
  * A shared wall has exactly one honest failure mode: say so. Returning an
@@ -89,7 +109,9 @@ export interface Metadata extends Omit<Stream, "addedAt"> {}
 async function ask<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
   const data = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
-  if (!res.ok || !data) throw new Error(data?.error ?? "The wall isn't answering.");
+  if (!res.ok || !data) {
+    throw new WallError(data?.error ?? "The wall isn't answering.", res.status);
+  }
   return data;
 }
 

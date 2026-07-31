@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { failed } from "@/app/api/streams/failure";
+import { AdminUnconfigured } from "@/lib/admin/config";
+import { currentAdmin, sameOrigin } from "@/lib/admin/guard";
 import { LookupError } from "@/lib/lookup";
 import { lookupSource } from "@/lib/lookup-source";
 import { parseKey, parseSource, PROVIDER_LABEL, sourceKey } from "@/lib/source";
@@ -8,14 +10,24 @@ import * as wall from "@/lib/wall";
 /**
  * The wall itself — one shared wall, in Neon, for everybody.
  *
- * - `GET` — what is on it.
- * - `POST { v }` — put a stream up. **A key or a URL, and nothing else.** The
- *   title, channel and thumbnail are looked up here rather than accepted from
- *   the caller: this list is rendered to every visitor, so a client-supplied
- *   title would be arbitrary text and a client-supplied thumbnail an arbitrary
- *   `img src`, on everyone's wall, from anyone who can reach this route.
+ * One door, and one rule per method — the same asymmetry `app/api/watchlist`
+ * already spells out for the channels it watches, and for the same reason: the
+ * wall is everybody's, so filling it is everybody's; emptying it is not.
+ *
+ * - `GET` — what is on it. Open.
+ * - `POST { v }` — put a stream up. **Open**, and a key or a URL and nothing
+ *   else. The title, channel and thumbnail are looked up here rather than
+ *   accepted from the caller: this list is rendered to every visitor, so a
+ *   client-supplied title would be arbitrary text and a client-supplied
+ *   thumbnail an arbitrary `img src`, on everyone's wall, from anyone who can
+ *   reach this route.
  * - `DELETE ?v=<key>` — take one off. `DELETE ?sourced=1` — take every
- *   auto-sourced one off.
+ *   auto-sourced one off. **Admin only**, checked here on every call, both
+ *   paths. Adding a stream is additive and undoable; a removal happens to
+ *   everybody at once and there is no undo — the row is gone, and a sourced one
+ *   is remembered as dismissed so the sweep cannot put it back. The wall hides
+ *   the ✕ from a visitor, but a page that hides a button proves nothing to a
+ *   route `curl` can reach, which is why the check lives here.
  *
  * Both platforms come through the same door. What lands in the database is
  * `lib/source.ts`' key — a bare video id for YouTube, a prefixed one for Twitch
@@ -26,6 +38,22 @@ import * as wall from "@/lib/wall";
  */
 
 export const revalidate = 0;
+
+/** The one refusal `DELETE` gives. Never says whether the cookie was close. */
+function unauthorized(): NextResponse {
+  return NextResponse.json(
+    { error: "Only an operator can take a stream off the wall." },
+    { status: 401 },
+  );
+}
+
+/**
+ * Not an authorization check, and never was — it is what stops another site's
+ * page from driving this one on a signed-in operator's behalf.
+ */
+function forbidden(): NextResponse {
+  return NextResponse.json({ error: "Refused: cross-site request." }, { status: 403 });
+}
 
 export async function GET() {
   try {
@@ -75,9 +103,24 @@ export async function POST(request: Request) {
   }
 }
 
+/**
+ * Take one off, or take every sourced one off. The one thing here that takes a
+ * session — and the gate is the whole handler's, not one branch's.
+ *
+ * `sameOrigin` first, then the session, and both before the key is even parsed:
+ * a caller with no business here learns nothing about whether the key was good.
+ * A deployment that cannot decide who is an admin refuses the removal rather
+ * than guessing at it, while adds keep working — the same stance
+ * `app/api/watchlist` takes, and the reason that branch is spelled out here
+ * instead of left to `failed`, which speaks for the database.
+ */
 export async function DELETE(request: Request) {
+  if (!sameOrigin(request)) return forbidden();
+
   const params = new URL(request.url).searchParams;
   try {
+    if (!(await currentAdmin(Date.now()))) return unauthorized();
+
     if (params.get("sourced")) {
       return NextResponse.json({ streams: await wall.clearSourced(Date.now()) });
     }
@@ -90,6 +133,10 @@ export async function DELETE(request: Request) {
     // rebuilt from the parse rather than trusting the string that arrived.
     return NextResponse.json({ streams: await wall.removeStream(sourceKey(source), Date.now()) });
   } catch (err) {
+    if (err instanceof AdminUnconfigured) {
+      console.error("[wall] not configured");
+      return NextResponse.json({ error: err.message }, { status: 503 });
+    }
     return failed(err);
   }
 }
