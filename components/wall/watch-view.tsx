@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { LiveChat } from "@/components/chat/live-chat";
-import { CleanPlayer } from "@/components/player/clean-player";
+import { CleanPlayer, type PlayerHandle } from "@/components/player/clean-player";
 import { TwitchPlayer } from "@/components/player/twitch-player";
 import { ErrorState } from "@/components/states";
+import { StreamDescription } from "@/components/wall/stream-description";
 import { StreamWheel } from "@/components/wall/stream-wheel";
+import { tidy } from "@/lib/description";
 import { compact } from "@/lib/format";
 import { parseKey, PROVIDER_LABEL, sourceNoun, watchLinkUrl } from "@/lib/source";
 import { addStream, listStreams, lookup, type Stream } from "@/lib/stream";
@@ -32,6 +34,15 @@ export function WatchView({ videoId }: { videoId: string }) {
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [onWall, setOnWall] = useState(false);
+  // The one way into the player from outside it, held here so a chapter mark
+  // in the description can move the picture. Null on a Twitch stream, where
+  // there is no `CleanPlayer` mounted at all — which is the same answer
+  // `readDescription` gives by not marking chapter marks up there in the first
+  // place, so the click cannot happen either way.
+  const playerRef = useRef<PlayerHandle>(null);
+  const seek = useCallback((seconds: number) => {
+    playerRef.current?.seekTo(seconds);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,8 +102,18 @@ export function WatchView({ videoId }: { videoId: string }) {
     );
   }
 
+  // Both questions asked of the tidied text rather than the raw, because both
+  // are about what will be on screen: a description padded with six blank
+  // screens is not a long one, and a description that is nothing but those
+  // blank screens is no description at all and should say so.
+  //
+  // The raw string is still what travels on — `StreamDescription` tidies it
+  // itself, from the same starting point, because tidying is a one-pass decode
+  // and running it over its own output would turn a channel's literal `&#39;`
+  // into an apostrophe it never typed.
   const description = stream?.description ?? "";
-  const isLong = description.length > 420;
+  const shown = tidy(description);
+  const isLong = shown.length > 420;
 
   return (
     /* Three regions, one grid: the stage, the chat, and the rest of the wall.
@@ -126,6 +147,7 @@ export function WatchView({ videoId }: { videoId: string }) {
           />
         ) : (
           <CleanPlayer
+            ref={playerRef}
             videoId={videoId}
             isLive={stream?.isLive}
             title={stream?.title}
@@ -191,16 +213,17 @@ export function WatchView({ videoId }: { videoId: string }) {
             )}
           </div>
 
-          {description ? (
+          {shown ? (
             <div className="mt-6 border-t border-edge-soft pt-5">
               <p className="eyebrow">Description</p>
-              <p
-                className={`mt-3 max-w-3xl text-sm leading-relaxed whitespace-pre-wrap text-muted ${
+              <StreamDescription
+                description={description}
+                provider={source?.provider}
+                onSeek={seek}
+                className={`mt-3 max-w-3xl text-sm leading-relaxed break-words whitespace-pre-wrap text-muted ${
                   isLong && !expanded ? "line-clamp-6" : ""
                 }`}
-              >
-                {description}
-              </p>
+              />
               {isLong && (
                 <button
                   type="button"

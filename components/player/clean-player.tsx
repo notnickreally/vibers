@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type Ref, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import {
   BackIcon,
   ExitFullscreenIcon,
@@ -207,12 +207,32 @@ const SEEK_ABANDON_MS = 5000;
 /** What YouTube says when it won't be embedded — worth saying plainly. */
 const EMBED_REFUSED = new Set([101, 150]);
 
+/**
+ * The one thing the page outside the player is allowed to ask of it.
+ *
+ * It exists because the description has chapter marks in it now, and a chapter
+ * mark has to move the picture that is already playing. The `start` prop cannot
+ * do that: it is a dependency of the effect that builds the embed, so changing
+ * it destroys the player and writes a new iframe — the video reloads from cold,
+ * buffers, and flashes its poster, which is not what "12:34" promises.
+ *
+ * So the seek goes out instead of the time coming in. Nothing else is
+ * published: the transport, the volume and the live edge stay the player's own
+ * business, because they are controls a reader is looking at while they use
+ * them, and this is the one action that starts somewhere else on the page.
+ */
+export interface PlayerHandle {
+  /** Move the picture to `seconds`, clamped to what is actually seekable. */
+  seekTo(seconds: number): void;
+}
+
 export function CleanPlayer({
   videoId,
   start,
   isLive,
   title,
   channel,
+  ref,
 }: {
   videoId: string;
   start?: number;
@@ -221,6 +241,7 @@ export function CleanPlayer({
   /** Shown in our own title strip above the picture. */
   title?: string;
   channel?: string;
+  ref?: Ref<PlayerHandle>;
 }) {
   const shellRef = useRef<HTMLElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -543,6 +564,23 @@ export function CleanPlayer({
     },
     [seekable, seek, win.end, win.start, scrub, position],
   );
+
+  // A chapter mark, arriving from the description underneath. Clamped to the
+  // window exactly as `nudge` is — a live stream's DVR does not reach back to
+  // the 4:12 of a broadcast that has been running for six hours, and asking it
+  // to is how you get a seek that never lands. Played as well as sought,
+  // because the reader asked to be taken somewhere, and a paused player parked
+  // on a new frame looks like the click did nothing.
+  const seekTo = useCallback(
+    (seconds: number) => {
+      if (!seekable) return;
+      seek(Math.min(win.end, Math.max(win.start, seconds)));
+      playerRef.current?.playVideo();
+    },
+    [seekable, seek, win.end, win.start],
+  );
+
+  useImperativeHandle(ref, () => ({ seekTo }), [seekTo]);
 
   const toggle = useCallback(() => {
     const p = playerRef.current;
